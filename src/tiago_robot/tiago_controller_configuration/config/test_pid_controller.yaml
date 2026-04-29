@@ -1,0 +1,14 @@
+test_pid_controller:
+  ros__parameters:
+    
+    type: pid_controller/PidController
+
+    dof_names:
+      - arm_1_joint
+
+    command_interface: velocity
+
+    reference_and_state_interfaces: ["velocity"]
+
+    gains:
+      joint1: {p: 1.0, i: 2.0, d: 10.0, i_clamp_max: 5.0, i_clamp_min: -5.0}

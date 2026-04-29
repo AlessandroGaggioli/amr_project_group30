@@ -1,0 +1,19 @@
+torso_controller:
+  ros__parameters:
+    joints:
+      - torso_lift_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+
+    constraints:
+      goal_time: 0.6
+      stopped_velocity_tolerance: 5.0 # FIXME: See #8429
+      torso_lift_joint:
+        goal: 0.02
+
+controller_manager:
+  ros__parameters:
+    torso_controller:
+      type: joint_trajectory_controller/JointTrajectoryController

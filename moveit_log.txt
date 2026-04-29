@@ -1,0 +1,80 @@
+[INFO] [launch]: All log files can be found below /home/alessandrogaggioli/.ros/log/2026-04-29-12-37-55-431865-alessandrogaggioli-HP-Laptop-15s-eq3xxx-31416
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [rviz2-1]: process started with pid [31420]
+[rviz2-1] [0m[INFO] [1777459076.261953392] [rviz2]: Stereo is NOT SUPPORTED[0m
+[rviz2-1] [0m[INFO] [1777459076.262060983] [rviz2]: OpenGl version: 4.6 (GLSL 4.6)[0m
+[rviz2-1] [0m[INFO] [1777459076.285451520] [rviz2]: Stereo is NOT SUPPORTED[0m
+[rviz2-1] Warning: class_loader.impl: SEVERE WARNING!!! A namespace collision has occurred with plugin factory for class rviz_default_plugins::displays::InteractiveMarkerDisplay. New factory will OVERWRITE existing one. This situation occurs when libraries containing plugins are directly linked against an executable (the one running right now generating this message). Please separate plugins out into their own library or just don't link against the library and use either class_loader::ClassLoader/MultiLibraryClassLoader to open.
+[rviz2-1]          at line 253 in /opt/ros/humble/include/class_loader/class_loader/class_loader_core.hpp
+[rviz2-1] [0m[INFO] [1777459077.025928549] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.589092 seconds[0m
+[rviz2-1] [0m[INFO] [1777459077.025998202] [moveit_robot_model.robot_model]: Loading robot model 'tiago'...[0m
+[rviz2-1] [0m[INFO] [1777459077.026014411] [moveit_robot_model.robot_model]: No root/virtual joint specified in SRDF. Assuming fixed joint[0m
+[rviz2-1] [33m[WARN] [1777459077.027401657] [moveit_robot_model.robot_model]: Link base_laser_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027425189] [moveit_robot_model.robot_model]: Link base_sonar_01_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027434455] [moveit_robot_model.robot_model]: Link base_sonar_02_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027442389] [moveit_robot_model.robot_model]: Link base_sonar_03_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027476399] [moveit_robot_model.robot_model]: Link caster_back_left_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027493219] [moveit_robot_model.robot_model]: Link caster_back_right_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027505541] [moveit_robot_model.robot_model]: Link caster_front_left_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.027518744] [moveit_robot_model.robot_model]: Link caster_front_right_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459077.037545906] [moveit_robot_model.robot_model]: Link base_cover_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [31m[ERROR] [1777459077.061803981] [rviz2]: The link arm_1_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459077.378048494] [rviz2]: The link gripper_left_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459077.409383338] [rviz2]: The link gripper_right_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.524561471] [moveit_ros_visualization.motion_planning_frame]: Action server: /recognize_objects not available[0m
+[rviz2-1] [0m[INFO] [1777459080.539171378] [moveit_ros_visualization.motion_planning_frame]: MoveGroup namespace changed: / -> . Reloading params.[0m
+[rviz2-1] [0m[INFO] [1777459080.629978035] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0.033226 seconds[0m
+[rviz2-1] [0m[INFO] [1777459080.630032171] [moveit_robot_model.robot_model]: Loading robot model 'tiago'...[0m
+[rviz2-1] [0m[INFO] [1777459080.630041587] [moveit_robot_model.robot_model]: No root/virtual joint specified in SRDF. Assuming fixed joint[0m
+[rviz2-1] [33m[WARN] [1777459080.631532898] [moveit_robot_model.robot_model]: Link base_laser_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631582055] [moveit_robot_model.robot_model]: Link base_sonar_01_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631592884] [moveit_robot_model.robot_model]: Link base_sonar_02_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631601900] [moveit_robot_model.robot_model]: Link base_sonar_03_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631616275] [moveit_robot_model.robot_model]: Link caster_back_left_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631630991] [moveit_robot_model.robot_model]: Link caster_back_right_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631644786] [moveit_robot_model.robot_model]: Link caster_front_left_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.631656256] [moveit_robot_model.robot_model]: Link caster_front_right_1_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [33m[WARN] [1777459080.641601164] [moveit_robot_model.robot_model]: Link base_cover_link has visual geometry but no collision geometry. Collision geometry will be left empty. Fix your URDF file by explicitly specifying collision geometry.[0m
+[rviz2-1] [0m[INFO] [1777459080.721175253] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting planning scene monitor[0m
+[rviz2-1] [0m[INFO] [1777459080.721847974] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/monitored_planning_scene'[0m
+[rviz2-1] [31m[ERROR] [1777459080.722141223] [rviz2]: The link arm_1_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.726660745] [rviz2]: The link gripper_left_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.727077673] [rviz2]: The link gripper_right_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [0m[INFO] [1777459080.736844155] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting planning scene monitor[0m
+[rviz2-1] [0m[INFO] [1777459080.737496921] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/monitored_planning_scene'[0m
+[rviz2-1] [31m[ERROR] [1777459080.737827325] [rviz2]: The link arm_1_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.741994353] [rviz2]: The link gripper_left_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.742482969] [rviz2]: The link gripper_right_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.751618153] [rviz2]: The link arm_1_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.755220861] [rviz2]: The link gripper_left_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.755739530] [rviz2]: The link gripper_right_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [0m[INFO] [1777459080.767885665] [interactive_marker_display_106183996982064]: Connected on namespace: /rviz_moveit_motion_planning_display/robot_interaction_interactive_marker_topic[0m
+[rviz2-1] [31m[ERROR] [1777459080.768383486] [rviz2]: The link arm_1_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.772382547] [rviz2]: The link gripper_left_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.772785610] [rviz2]: The link gripper_right_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.780047418] [rviz2]: The link arm_1_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.784207974] [rviz2]: The link gripper_left_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [31m[ERROR] [1777459080.784687613] [rviz2]: The link gripper_right_finger_link is has unrealistic inertia, so the equivalent inertia box will not be shown.
+[rviz2-1] [0m
+[rviz2-1] [0m[INFO] [1777459080.800014400] [moveit_ros_visualization.motion_planning_frame]: group arm[0m
+[rviz2-1] [0m[INFO] [1777459080.800046737] [moveit_ros_visualization.motion_planning_frame]: Constructing new MoveGroup connection for group 'arm' in namespace ''[0m
+[rviz2-1] [0m[INFO] [1777459080.816490371] [move_group_interface]: Ready to take commands for planning group arm.[0m
+[rviz2-1] [0m[INFO] [1777459080.822004474] [interactive_marker_display_106183996982064]: Sending request for interactive markers[0m
+[rviz2-1] [0m[INFO] [1777459080.851766118] [interactive_marker_display_106183996982064]: Service response received for initialization[0m

@@ -1,0 +1,9 @@
+ft_sensor_controller:
+  ros__parameters:
+    frame_id: wrist_ft_link
+    sensor_name: wrist_ft_sensor
+
+controller_manager:
+  ros__parameters:
+    ft_sensor_controller:
+      type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster

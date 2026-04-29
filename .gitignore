@@ -1,0 +1,19 @@
+# ROS 2 build artifacts
+build/
+install/
+log/
+
+# Python-specific
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# System and IDEs
+.DS_Store
+.vscode/
+.idea/
+
+# Gazebo/Log files
+*.log
+*.pcd

@@ -1,0 +1,21 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Mantieni il valore originale se diverso
+
+    arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    torso_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    head_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    mobile_base_controller:
+      type: diff_drive_controller/DiffDriveController
+
+    ft_sensor_controller:
+      type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
+
+
+
