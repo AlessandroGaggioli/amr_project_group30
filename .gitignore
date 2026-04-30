@@ -16,4 +16,4 @@ __pycache__/
 
 # Gazebo/Log files
 *.log
-*.pcd
+*.pcd*.txt
