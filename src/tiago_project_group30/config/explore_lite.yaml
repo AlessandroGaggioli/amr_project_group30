@@ -2,18 +2,30 @@ explore_node:
   ros__parameters:
     use_sim_time: true
     robot_base_frame: "base_footprint"
-    costmap_topic: "/map"
-    costmap_updates_topic: "/map_updates"
+    costmap_topic: "/global_costmap/costmap"
+    costmap_updates_topic: "/global_costmap/costmap_updates"
     visualize: true
     planner_frequency: 0.33
     progress_timeout: 60.0
     return_to_init: false
     # -- Tuning per spazi stretti --
-    min_frontier_size: 0.70      # Abbassato per entrare in porte e fessure
+    min_frontier_size: 0.25      # Abbassato per entrare in porte e fessure
     potential_scale: 3.0         # Alta priorità alle frontiere vicine
-    orientation_scale: 0.0 
+    orientation_scale: 3.0 
     gain_scale: 1.5              # Alta priorità alle zone che scoprono molta mappa
     transform_tolerance: 0.5     # Evita crash se il TF ha un leggero lag nelle rotazioni
+
+# explore_node:
+#   ros__parameters:
+#     use_sim_time: true
+#     robot_base_frame: base_footprint
+#     costmap_topic: /global_costmap/costmap
+#     costmap_updates_topic: /global_costmap/costmap_updates
+#     visualize: true
+#     planner_frequency: 1.0
+#     progress_timeout: 30.0
+#     min_frontier_size: 0.5
+#     return_to_init: false
     
 # alessandrogaggioli@alessandrogaggioli-HP-Laptop-15s-eq3xxx:~/tiago_ws$ ros2 param list /explore_node
 #   costmap_topic

@@ -35,8 +35,8 @@ def generate_launch_description():
             get_package_share_directory('tiago_2dnav'),'launch','tiago_nav_bringup.launch.py')]),
             launch_arguments={
                 'is_public_sim':'false',
-                'rviz':'True',
-                'slam':'True'
+                'rviz':'true',
+                'slam':'true'
             }.items()
     )
 
@@ -68,7 +68,12 @@ def generate_launch_description():
     explore = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=arm_home_node,
-            on_exit=[explore_node],
+            on_exit=[
+                TimerAction(
+                    period=5.0,
+                    actions=[explore_node],
+                )
+            ]
         )
     )
 
