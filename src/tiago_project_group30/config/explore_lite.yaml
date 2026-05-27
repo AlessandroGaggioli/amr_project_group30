@@ -10,8 +10,8 @@ explore_node:
     planner_frequency: 0.33
     progress_timeout: 60.0
     return_to_init: false
-    min_frontier_size: 0.15     
-    potential_scale: 2.0        
-    orientation_scale: 3.0 
-    gain_scale: 1.5             
+    min_frontier_size: 0.25     
+    potential_scale: 1.0        
+    orientation_scale: 0.0 
+    gain_scale: 2.0             
     transform_tolerance: 0.5     

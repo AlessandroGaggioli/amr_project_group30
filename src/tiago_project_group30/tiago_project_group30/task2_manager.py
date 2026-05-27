@@ -211,6 +211,21 @@ class Task2Manager(Node):
         self.pick_marker_in_map = None     # PyKDL.Frame or None
         self.place_marker_in_map = None
 
+        # Distance from the camera to the marker at the moment of the
+        # observation that produced *_marker_in_map. ArUco pose accuracy
+        # degrades fast with distance (a 25 cm marker at 5 m is only ~30
+        # px wide, so its estimated depth/orientation can be off by a
+        # meter+). We use these to KEEP THE CLOSEST OBSERVATION:
+        # in _handle_aruco_detection we only overwrite *_marker_in_map
+        # when the new observation is closer than the stored one. This
+        # extends the Lab 3 pattern (where the robot is stationary and a
+        # plain "latest observation wins" policy was enough) to the
+        # moving-robot case in Task 2 -- without a filter, a single bad
+        # late observation from a worse angle/distance could replace a
+        # good earlier one.
+        self.pick_detection_distance = float("inf")
+        self.place_detection_distance = float("inf")
+
         # Latched approach poses in map frame (PoseStamped)
         self.pick_approach_pose = None
         self.place_approach_pose = None
@@ -351,6 +366,24 @@ class Task2Manager(Node):
         if already_have and not self._refresh_approach_poses:
             return
 
+        # ArUco pose accuracy degrades with distance (smaller pixel area
+        # of the marker -> noisier corner detection -> noisier PnP). The
+        # camera-frame translation of the marker IS the distance from
+        # camera to marker, so we compute it directly without any TF.
+        # KEEP-CLOSEST policy: only overwrite the stored marker_in_map if
+        # this new observation is closer than the previous one.
+        new_distance = math.sqrt(
+            aruco_in_cam.p.x() ** 2
+            + aruco_in_cam.p.y() ** 2
+            + aruco_in_cam.p.z() ** 2
+        )
+        prev_distance = (
+            self.pick_detection_distance if is_pick
+            else self.place_detection_distance
+        )
+        if already_have and new_distance >= prev_distance:
+            return  # this observation is no closer than what we already have
+
         # CRITICAL: compose into MAP frame NOW, using the camera TF
         # AT THE TIME OF THE DETECTION (msg.header.stamp). This freezes
         # the marker at its true world position. Recomposing later with a
@@ -380,8 +413,10 @@ class Task2Manager(Node):
 
         if is_pick:
             self.pick_marker_in_map = marker_in_map
+            self.pick_detection_distance = new_distance
         else:
             self.place_marker_in_map = marker_in_map
+            self.place_detection_distance = new_distance
 
     # ------------------------------------------------------------------
     # Approach-frame broadcaster (lab3-style)

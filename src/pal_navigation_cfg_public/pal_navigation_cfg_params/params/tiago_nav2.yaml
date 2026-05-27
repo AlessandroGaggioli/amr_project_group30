@@ -62,7 +62,14 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.1
     use_sim_time: true
-    simulate_ahead_time: 2.0
+    # Spin/Backup/DriveOnHeading simulate the robot footprint forward by
+    # simulate_ahead_time seconds and abort if the simulated trajectory
+    # would intersect any inflated cell. With 2.0 s and max_rotational_vel
+    # 1.0 rad/s, the spin recovery was checking ~115 deg of rotation ahead
+    # -- too conservative in tight spots, so 10 of 14 spins failed
+    # immediately without ever executing. Halving to 1.0 s lets the
+    # recoveries actually run instead of self-aborting.
+    simulate_ahead_time: 1.0
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
     rotational_acc_lim: 3.2
@@ -158,8 +165,8 @@ controller_server:
       movement_time_allowance: 5.0
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.45
+      yaw_goal_tolerance: 0.50
       stateful: True
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
@@ -185,7 +192,7 @@ controller_server:
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
-      xy_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.45
       trans_stopped_velocity: 0.25
       short_circuit_trajectory_evaluation: True
       stateful: True
@@ -218,7 +225,7 @@ global_costmap:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
         footprint_clearing_enabled: true
-        observation_sources: scan pointcloud
+        observation_sources: scan #pointcloud
         scan:
           topic: /scan_raw
           max_obstacle_height: 2.0
@@ -241,17 +248,17 @@ global_costmap:
         # the camera isn't currently looking at fade out -- the right fix
         # for that is to make the saved map include them (re-run Task 1
         # SLAM with the kitchen counter properly captured).
-        pointcloud:
-          topic: /head_front_camera/depth_registered/points
-          max_obstacle_height: 2.0
-          min_obstacle_height: 0.15
-          clearing: True
-          marking: True
-          data_type: "PointCloud2"
-          raytrace_max_range: 5.0
-          raytrace_min_range: 0.35
-          obstacle_max_range: 3.0
-          obstacle_min_range: 0.35
+        # pointcloud:
+        #   topic: /head_front_camera/depth_registered/points
+        #   max_obstacle_height: 2.0
+        #   min_obstacle_height: 0.15
+        #   clearing: True
+        #   marking: True
+        #   data_type: "PointCloud2"
+        #   raytrace_max_range: 5.0
+        #   raytrace_min_range: 0.35
+        #   obstacle_max_range: 3.0
+        #   obstacle_min_range: 0.35
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -259,7 +266,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.35
+        inflation_radius: 0.45
       always_send_full_costmap: True
 
 local_costmap:
@@ -286,8 +293,12 @@ local_costmap:
         # away from the obstacle. The GLOBAL costmap keeps the more
         # conservative cost_scaling_factor=3.0, so the planned route is
         # still safe; only local trajectory scoring loosens up.
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.35
+        # 8.0 (vs 5.0) makes the gradient even steeper so the robot can
+        # navigate through tight pockets near depth-marked obstacles
+        # (kitchen counter etc.) where it was getting stuck recovering
+        # repeatedly during long State 4/5 traverses.
+        cost_scaling_factor: 8.0
+        inflation_radius: 0.45
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
