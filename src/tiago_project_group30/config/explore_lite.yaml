@@ -2,8 +2,6 @@ explore_node:
   ros__parameters:
     use_sim_time: true
     robot_base_frame: "base_footprint"
-    # costmap_topic: "/global_costmap/costmap"
-    # costmap_updates_topic: "/global_costmap/costmap_updates"
     costmap_topic: "/map"
     costmap_updates_topic: "/map/map_updates"
     visualize: true
