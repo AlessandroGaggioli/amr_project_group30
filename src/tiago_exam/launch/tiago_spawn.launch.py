@@ -18,6 +18,28 @@ from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
 
+#######################################################################
+# GROUP 30 - Task 2 random spawn
+# Required by the exam spec: "The alignement between the map and the
+# navigation system must be performed with the robot initialized in a
+# random position (different from the one used for map generation)."
+# Each launch picks one of a whitelist of known-free (x, y, yaw) poses in
+# the group30 world. The first entry is the original PAL default, kept
+# so behaviour is unchanged when random.choice happens to pick index 0.
+#######################################################################
+import random
+
+SPAWN_CANDIDATES = [
+    (0.0, -1.3, 0.0),     # original PAL default
+    (-1.0, -3.0, 0.0),
+    (-2.0, -1.0, -1.57),
+    (4.5,-1.0,1.57),
+    (4.5,-3.0,3.14),
+]
+#######################################################################
+# END GROUP 30 random spawn
+#######################################################################
+
 
 def generate_launch_description():
     #    This format doesn't work because we have to expand gzpose into
@@ -29,8 +51,15 @@ def generate_launch_description():
 
     # @TODO: load PID gains? used in gazebo_ros_control fork
     # @TODO: load tiago_pal_hardware_gazebo
-    
-    spawn_coordinates = [0.0, -1.3, 0.0]
+
+    #######################################################################
+    # GROUP 30 - randomized spawn (x, y, yaw)
+    # Was: spawn_coordinates = [0.0, -1.3, 0.0]
+    #######################################################################
+    spawn_coordinates = list(random.choice(SPAWN_CANDIDATES))
+    #######################################################################
+    # END GROUP 30
+    #######################################################################
 
     model_name = DeclareLaunchArgument(
         'model_name', default_value='tiago',
@@ -43,7 +72,18 @@ def generate_launch_description():
                                        'model_name'),
                                    '-x', str(spawn_coordinates[0]),
                                    '-y', str(spawn_coordinates[1]),
-                                   '-z', str(spawn_coordinates[2]),
+                                   #######################################
+                                   # GROUP 30 - was: '-z', str(spawn_coordinates[2])
+                                   # z is always 0 on the floor; the third
+                                   # entry of spawn_coordinates is now the
+                                   # yaw, passed via -Y so the robot also
+                                   # spawns with a random orientation.
+                                   #######################################
+                                   '-z', '0.0',
+                                   '-Y', str(spawn_coordinates[2]),
+                                   #######################################
+                                   # END GROUP 30
+                                   #######################################
                                    # LaunchConfiguration('gzpose'),
                                    ],
                         output='screen')
