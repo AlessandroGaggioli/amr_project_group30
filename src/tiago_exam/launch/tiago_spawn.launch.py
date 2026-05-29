@@ -30,11 +30,11 @@ from launch_ros.actions import Node
 import random
 
 SPAWN_CANDIDATES = [
-    (0.0, -1.3, 0.0),     # original PAL default
+    (0.0, -1.3, 0.0),     # original default
     (-1.0, -3.0, 0.0),
     (-2.0, -1.0, -1.57),
-    (4.5,-1.0,1.57),
-    (4.5,-3.0,3.14),
+    (4.75,-1.0,1.57),
+    (4.75,-3.0,3.14),
 ]
 #######################################################################
 # END GROUP 30 random spawn

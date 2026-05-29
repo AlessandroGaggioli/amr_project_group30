@@ -1416,6 +1416,7 @@
       <static>0</static>
     </include>
 
+    <plugin name="gazebo_link_attacher" filename="libgazebo_link_attacher.so"/>
 
   </world>
 </sdf>

@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'task1_manager = tiago_project_group30.task1_manager:main',
             'task2_manager = tiago_project_group30.task2_manager:main',
+            'task3_manager = tiago_project_group30.task3_manager:main',
         ],
     },
 )

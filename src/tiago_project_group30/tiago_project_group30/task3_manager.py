@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
-# TASK 2 of Autonomous Mobile Robotics Exam - Group 30
+# TASK 3 of Autonomous Mobile Robotics Exam - Group 30
 #
-# Entrypoint: wires the per-concern components into a single rclpy.node.Node
-# and runs the StateMachine on a separate thread (so MultiThreadedExecutor
-# keeps spinning subscriptions, service calls, and action futures while the
-# state machine polls them at ~20 Hz).
-#
-# Components (each in its own task2_*.py file):
-#   - ArmController   (tiago_arm.py)         MoveIt2 arm + head publisher
-#   - NavClient       (task2_nav.py)        Nav2 NavigateToPose, polled
-#   - AmclLocalizer   (task2_amcl.py)       AMCL + Spin + costmap clears
-#   - ArucoTracker    (task2_aruco.py)      ArUco subs + approach broadcaster
-#   - CostmapSampler  (task2_costmap.py)    global costmap + random sampler
-#   - StateMachine    (task2_state_machine.py)
-#
-# Constants live in task2_constants.py; helpers in task2_kdl_helpers.py.
+# Entrypoint for Task 3: wires together the Task 2 components (arm, nav,
+# AMCL, wall-marker aruco tracker, costmap sampler) PLUS the three new
+# Task 3 components (gripper, link attacher, cube marker tracker) into a
+# single rclpy.node.Node, and runs the Task3StateMachine on its own
+# thread (same Lab 4 non-blocking pattern used in task2_manager.py).
 
 from threading import Event, Thread
 
@@ -32,27 +23,29 @@ from tiago_project_group30.tiago_arm import ArmController
 from tiago_project_group30.task2_aruco import ArucoTracker
 from tiago_project_group30.task2_costmap import CostmapSampler
 from tiago_project_group30.task2_nav import NavClient
-from tiago_project_group30.task2_state_machine import StateMachine
+from tiago_project_group30.task3_cube_tracker import CubeTracker
+from tiago_project_group30.task3_link_attacher import LinkAttacher
+from tiago_project_group30.task3_state_machine import Task3StateMachine
+from tiago_project_group30.tiago_gripper import GripperController
 
 
-class Task2Manager(Node):
+class Task3Manager(Node):
 
     def __init__(self):
-        super().__init__("task2_manager")
+        super().__init__("task3_manager")
 
         # ---------- callback groups ----------
         cb_group_arm = ReentrantCallbackGroup()
         cb_group_nav = ReentrantCallbackGroup()
         cb_group_io = ReentrantCallbackGroup()
+        cb_group_gripper = ReentrantCallbackGroup()
 
-        # ---------- TF (shared by aruco tracker and costmap sampler) ----------
+        # ---------- TF ----------
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        # ---------- components ----------
-        # Order matters: AmclLocalizer must exist before ArucoTracker
-        # (gated on amcl.converged).
+        # ---------- Task 2 components (re-used as-is) ----------
         self.arm = ArmController(self, cb_group_arm)
         self.nav = NavClient(self, cb_group_nav)
         self.amcl = AmclLocalizer(self, cb_group_nav, cb_group_io)
@@ -61,15 +54,25 @@ class Task2Manager(Node):
         )
         self.sampler = CostmapSampler(self, self.tf_buffer, cb_group_io)
 
+        # ---------- Task 3 components ----------
+        self.gripper = GripperController(self, cb_group_gripper)
+        self.link_attacher = LinkAttacher(self, cb_group_io)
+        self.cube_tracker = CubeTracker(
+            self, self.tf_buffer, self.amcl, cb_group_io
+        )
+
         # ---------- state machine ----------
-        self.state_machine = StateMachine(
-            self, self.arm, self.nav, self.amcl, self.aruco, self.sampler
+        self.state_machine = Task3StateMachine(
+            self,
+            self.arm, self.nav, self.amcl, self.aruco, self.sampler,
+            self.gripper, self.link_attacher, self.cube_tracker,
+            self.tf_buffer,
         )
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Task2Manager()
+    node = Task3Manager()
 
     executor_ready = Event()
     state_thread = Thread(
@@ -77,7 +80,10 @@ def main(args=None):
     )
     state_thread.start()
 
-    executor = MultiThreadedExecutor(num_threads=4)
+    # 5 threads (vs. 4 for Task 2): Task 3 adds the gripper callback group
+    # plus AttachLink/DetachLink service futures, all of which need to
+    # spin concurrently with the arm and nav action feedback.
+    executor = MultiThreadedExecutor(num_threads=5)
     executor.add_node(node)
     executor_ready.set()
 

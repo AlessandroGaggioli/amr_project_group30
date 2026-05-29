@@ -1,0 +1,258 @@
+# ROS 2 - Tiago Robot + Grasping
+
+```
+Alessio Caporali
+```
+```
+alessio.caporali@unibo.it
+```
+```
+DEI - LAR
+University of Bologna
+Viale del Risorgimento 2
+40136 Bologna
+```
+
+# Aruco
+
+```
+Install the aruco package:
+sudo apt-get install ros-humble-aruco-ros
+```
+```
+To detect and estimate the pose of an Aruco marker in gazebo, we need
+to:
+Add an Aruco marker in the gazebo simulation;
+Launch the Aruco detector node;
+Check the estimated pose of the marker via the provided topics.
+```
+
+# Aruco: Add Aruco Marker in Gazebo Simulation
+
+
+# Aruco: Launch Detector Node
+
+```
+To launch the aruco detector node, we can use the provided launch file
+(inside the lab3 pkg):
+```
+```
+ros2 launch lab3 single.launch.py marker_id:=
+marker_size:=0.
+```
+```
+The launch file accepts some important parameters:
+markerid: ID of the Aruco marker;
+markersize: Size of the Aruco marker (in meters).
+cameraframe: Name of the camera frame to use (default:
+headfrontcamerargbopticalframe).
+markerframe: Name of the marker frame to use (default:
+arucomarkerframe).
+```
+
+# Aruco: Check
+
+```
+A quick way to check the estimated pose of the marker is to use an im-
+age topic published by the aruco detector node.
+```
+```
+Start the rqt image viewer:
+ros2 run rqt_image_view rqt_image_view
+```
+```
+Select the image topic ”/arucosingle/result” and check the estimated
+pose of the marker.
+```
+```
+You can use the rqt joint trajectory controller to move the robot head to
+better localize the marker.
+ros2 run rqt_joint_trajectory_controller
+rqt_joint_trajectory_controller
+```
+
+# Aruco: Check
+
+
+# Aruco: Important Topics
+
+```
+The aruco detector node publishes the following topics:
+/arucosingle/debug: Image topic showing the processed image;
+/arucosingle/result: Image topic showing the detected marker;
+/arucosingle/marker: visualizationmsgs/msg/Marker;
+/arucosingle/pixel: geometrymsgs/msg/PointStamped;
+/arucosingle/position: geometrymsgs/msg/Vector3Stamped;
+/arucosingle/pose: geometrymsgs/msg/PoseStamped;
+/arucosingle/transform: geometrymsgs/msg/TransformStamped
+```
+
+# Task 1: Aruco Subscriber Node
+
+```
+Create a subscriber to the topic:
+/aruco_single/transform
+```
+```
+Employ the PyKDL library to convert the original msg
+geometry_msgs/msg/TransformStamped
+```
+```
+to a KDL frame.
+```
+```
+You can modify the ”1arucotfsubscriber.py” file in the ”lab3” pkg.
+```
+```
+To run the node:
+ros2 run lab3 1_aruco_tf_sub
+```
+
+# Task 2: Broadcast TFs
+
+```
+Create a node that broadcasts the following TFs:
+baselink→arucomarkerapproachframe;
+baselink→arucomarkertargetframe;
+Where thearucomarkerapproachframeandarucomarkertargetframe
+are the frames of the Aruco marker with respect to the base link.
+```
+```
+The ”approach” frame is the original aruco marker frame with an offset
+along the z-axis (e.g. 0.5 meters).
+```
+```
+You can modify the ”2arucotfbroadcaster.py” file in the ”lab3” pkg.
+You need to get the transformation from thebaselinkto theheadfrontcamerargbopticalframe,
+since the Aruco marker is attached to the head of the robot (check the
+tf tree).
+```
+```
+Therfore you need to concatenate the transformations (use PyKDL):
+baselink→headfrontcamerargbopticalframe
+headfrontcamerargbopticalframe→arucomarkertargetframe.
+arucomarkertargetframe→arucomarkerapproachframe.
+```
+
+# Task 2: Broadcast TFs (Expected Result)
+
+
+# Task 3: Move the Robot to the Aruco Marker
+
+```
+We can start to move the arm of the Tiago towards the Aruco marker.
+```
+```
+Let’s focus on the approach frame of the Aruco marker that we have just
+created.
+```
+```
+We are going to use pymoveit2 and the ”grippergraspingframe” as end-
+effector frame.
+```
+```
+You can modify the ”3movearm.py” file in the ”lab3” pkg.
+```
+
+# Task 3: Move the Robot to the Aruco Marker (Setup)
+
+```
+How to modify the approachframe to have the grasp from the ”top” of
+the Aruco marker?
+```
+
+# Grasping in simulation is complex... →LinkAttacher
+
+```
+Being able to successfully grasp an object in simulation is a complex task
+requiring specific tuning of the simulation friction parameters.
+```
+```
+The following repository contains 2 different ROS2 packages, which en-
+able the attachment of 2 different entity links in Gazebo. This attach-
+ment is done through a simple ROS2/Gazebo plugin.
+```
+```
+This plugin is useful for forcely grasping an object in simulation without
+the need to tune the simulation parameters.
+```
+```
+You are encouraged to try grasping with/without the plugin!
+```
+```
+LinkAttacherinstall
+```
+```
+Inside thesrcfolder of your ROS2 workspace (tiagows), clone the repos-
+itory and build its packages:
+git clone https://github.com/IFRA-Cranfield/IFRA_LinkAttacher
+cd ..
+colcon build --packages-select linkattacher_msgs
+ros2_linkattacher
+```
+
+# LinkAttacher: Activate the plugin
+
+```
+The tiago simulation automatically loads a gazebo ”world” file at startup.
+This file path is:
+pal_gazebo_worlds/worlds/eut_kitchen.world
+```
+```
+To activate the plugin, we need to add the following line at the end of
+the mentioned world file (just before the closing tag¡/world¿):
+```
+```
+<plugin name = "gazebo_link_attacher" filename =
+"libgazebo_link_attacher.so"/>
+```
+
+# LinkAttacher: Attach/Detach
+
+```
+Now, we can start the simulation and check if the plugin is correctly
+loaded.
+```
+```
+Start Tiago simulation:
+ros2 launch tiago_gazebo tiago_gazebo.launch.py
+```
+```
+Check available services:
+ros2 service list
+```
+```
+We should have 2 services available:
+```
+```
+\ATTACHLINK
+\DETACHLINK
+```
+
+# LinkAttacher: Attach/Detach
+
+```
+Example of attaching/detaching the coca cola to the gripper of the
+robot via ROS2 service calls.
+```
+```
+Attachthe coca cola to the gripper of the robot:
+ros2 service call
+/ATTACHLINK linkattacher_msgs/srv/AttachLink "{
+model1_name: ’tiago’, link1_name: ’gripper_left_finger_link’,
+model2_name: ’coca_cola’, link2_name: ’link’}"
+```
+```
+Detachthe coca cola from the gripper of the robot:
+```
+```
+ros2 service call
+/DETACHLINK linkattacher_msgs/srv/DetachLink "{
+model1_name: ’tiago’, link1_name: ’gripper_left_finger_link’,
+model2_name: ’coca_cola’, link2_name: ’link’}"
+```
+```
+We can use Moveit or rqtjointtrajectorycontroller to move the robot
+and check the behavior of the coca cola.
+```
+
