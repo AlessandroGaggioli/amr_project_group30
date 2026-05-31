@@ -327,7 +327,10 @@ class Task3StateMachine(CommonStates):
                 return
             # Second pass (after Nav2 has placed us in front of the
             # cube): closest-observation policy means cube_marker_in_map
-            # is now the refined short-range estimate. Compute grasp.
+            # is now the refined short-range estimate. FREEZE it so a late
+            # noisy detection can't shift the target sideways during the
+            # grasp, then compute grasp against the latched pose.
+            self.cube_tracker.freeze()
             try:
                 self._precompute_grasp_poses(marker)
             except Exception as e:
@@ -898,6 +901,9 @@ class Task3StateMachine(CommonStates):
             f"Next cube to pick: ID {next_id} -> nav back to PICK"
         )
         self.cube_tracker.reset_cube(next_id)
+        # Re-open the tracker (it was frozen for the previous cube's grasp)
+        # so the next cube's detections are accepted again.
+        self.cube_tracker.unfreeze()
         # Reset the cube-approach flag so the next cube also triggers
         # its own short-range nav refinement in State 11.
         self._cube_approached = False
@@ -942,9 +948,16 @@ class Task3StateMachine(CommonStates):
 
         if dist <= stop_dist:
             self.nav.stop()
+            # Final heading error to the target (how frontal we ended up).
+            fqz = tf.transform.rotation.z
+            fqw = tf.transform.rotation.w
+            final_yaw = math.atan2(2.0 * fqw * fqz, 1.0 - 2.0 * fqz * fqz)
+            final_bearing = math.atan2(target_y - ry, target_x - rx)
+            final_err = math.atan2(math.sin(final_bearing - final_yaw),
+                                   math.cos(final_bearing - final_yaw))
             self.node.get_logger().info(
                 f"{tag} done: {dist:.2f} m from target "
-                f"(stop {stop_dist:.2f} m)"
+                f"(stop {stop_dist:.2f} m), final yaw_err={final_err:.2f} rad"
             )
             return "done"
 
@@ -956,6 +969,7 @@ class Task3StateMachine(CommonStates):
             return "timeout"
 
         angular = 0.0
+        yaw_err = 0.0
         if steer:
             qz = tf.transform.rotation.z
             qw = tf.transform.rotation.w
@@ -967,7 +981,8 @@ class Task3StateMachine(CommonStates):
 
         self.nav.publish_forward(DRIVE_SPEED, angular=angular)
         self.node.get_logger().info(
-            f"{tag}: {dist:.2f} m -> stop {stop_dist:.2f} m",
+            f"{tag}: {dist:.2f} m -> stop {stop_dist:.2f} m, "
+            f"yaw_err={yaw_err:.2f} rad",
             throttle_duration_sec=1.0,
         )
         return None

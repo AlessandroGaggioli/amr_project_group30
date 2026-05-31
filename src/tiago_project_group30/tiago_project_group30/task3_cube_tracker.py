@@ -61,6 +61,14 @@ class CubeTracker:
         # until the state machine explicitly enables us at State 10.
         self.enabled = False
 
+        # Once the robot is at close grasp range we FREEZE the stored pose
+        # (same idea as task2_aruco.freeze): a single ArUco PnP has a few-cm
+        # lateral jitter, so a late noisy detection arriving just before the
+        # arm grasps could shift the target sideways along the finger-opening
+        # axis and make a finger clip the cube. After freeze() we stop
+        # updating cube_marker_in_map and grasp against the latched pose.
+        self.frozen = False
+
         # Per-cube subscription. We give each callback the cube_id by
         # closing over it in a small lambda so a single _on_detection
         # handles both feeds.
@@ -85,10 +93,22 @@ class CubeTracker:
         # detections are accepted and merged into cube_marker_in_map.
         self.enabled = True
 
+    def freeze(self):
+        # Latch the current pose: stop accepting new detections so the
+        # grasp uses a stable target (called once at close range).
+        self.frozen = True
+
+    def unfreeze(self):
+        # Re-open the tracker (called when moving on to the next cube).
+        self.frozen = False
+
     def _on_detection(self, msg: TransformStamped, cube_id: int):
         # Master gate (see __init__): drop everything that arrives while
         # the state machine is still running Task 2.
         if not self.enabled:
+            return
+        # Pose latched for the grasp: ignore late noisy detections.
+        if self.frozen:
             return
         # Same convergence gating used for wall markers: composing into
         # map before AMCL is locked produces garbage.

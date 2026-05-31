@@ -56,7 +56,12 @@ TIAGO_GRIPPER_LINK = "gripper_left_finger_link"
 # Gripper interface (Lab 2 / pymoveit2)
 ##############################
 GRIPPER_JOINT_NAMES = ["gripper_left_finger_joint", "gripper_right_finger_joint"]
-GRIPPER_OPEN_POSITIONS = [0.044, 0.044]   # 8 cm total opening, > 7 cm cube
+# Open to the joint limit (0.045, the URDF upper bound) for the WIDEST
+# possible gap during the descent: a small lateral PnP error in the cube
+# position then has the most room before a finger clips the cube on the
+# way down. (Margin is still only ~1 cm/side over the 7 cm cube, so the
+# pre-grasp pose freeze below matters more.)
+GRIPPER_OPEN_POSITIONS = [0.045, 0.045]
 # Close to FLAT CONTACT on the 7 cm cube, not all the way to 0. At
 # position 0.044 the opening is ~8 cm, so each finger pad sits ~position*
 # 0.909 from the cube centre; flat contact on a 7 cm cube (pad at 3.5 cm)
@@ -135,12 +140,12 @@ PLACE_TARGET_Z = (
 )
 
 # Forward offset from the robot's CURRENT base (see _precompute_drop_poses)
-# where the cube is set down. With the base ~PLACE_APPROACH_DISTANCE (0.60 m)
-# from the place wall after the push, 0.55 m forward lands the cube ~5 cm
-# shy of the wall -- on the surface. 0.45 m left it ~15 cm from the wall,
-# just short of the surface edge (cube dropped in front of the table).
-# Still inside arm reach (the pick worked at ~0.68 m forward).
-PLACE_FORWARD_OFFSET = 0.65    # meters
+# where the cube is set down. Kept MODERATE (0.45) so the arm does not reach
+# far out in front: at 0.65 m, combined with the close place push, the
+# extended arm hit the wall in front of the place surface. The place marker
+# is poorly localized from afar so the drop is imprecise regardless; the
+# priority here is not to swing the arm into the wall.
+PLACE_FORWARD_OFFSET = 0.45    # meters
 
 # Like the pick side, Nav2 parks short of the place wall because of
 # inflation, leaving the robot too far to set the cube on the surface.
@@ -148,7 +153,9 @@ PLACE_FORWARD_OFFSET = 0.65    # meters
 # pushes the base toward the PLACE WALL MARKER (aruco.place_marker_in_map),
 # steering frontal, until base_link is within this distance of it -- the
 # same closed-loop engine used for the pick cube approach.
-PLACE_APPROACH_DISTANCE = 0.65  # meters between base_link and place wall marker
+# Lowered 0.65 -> 0.30 to push the base much closer to the (poorly
+# localized, far-viewed) place marker so the drop lands nearer the table.
+PLACE_APPROACH_DISTANCE = 0.40  # meters between base_link and place wall marker
 
 ##############################
 # Head tilt
