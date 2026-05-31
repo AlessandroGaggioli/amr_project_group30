@@ -80,3 +80,32 @@ APPROACH_DISTANCE = 0.80  # meters
 # approach without forcing the robot to crawl right up to every wall
 # during the random search.
 MAX_DETECTION_DISTANCE = 3.5  # meters
+
+##############################
+# Per-waypoint head sweep (replaces the old Nav2 /spin 2*pi)
+##############################
+# At each random-search waypoint we used to send a Nav2 /spin 2*pi to
+# sweep the full 360 deg FOV. That action is fragile: DWB's collision /
+# oscillation critics frequently abort the rotation, every failure
+# disturbs AMCL, and 6-15 s per spin dominates the search runtime.
+#
+# Replacement: keep the base still, pan the head left/right. Each pan
+# position is held for SEARCH_PAN_DWELL seconds so the ArUco PnP has time
+# to converge. Coverage is narrower (~150 deg horizontal vs 360 deg of
+# the spin) but we make up for it in waypoint count and the natural
+# orientation change between waypoints.
+# Tilt stays at the Task 2 default (-0.5 rad) — wall markers are at
+# torso/eye height, not on a low surface.
+#
+# Pan range kept SMALL (~±35 deg) on purpose: the head depth camera is a
+# clearing observation source on the global_costmap (see tiago_nav2.yaml,
+# voxel layer with clearing=True). A wide pan sweeps the depth ray over
+# laterally-empty sectors, and the clearing pass wipes out voxels marking
+# mobili (kitchen counters, tables) that the base laser can't see. NavFn
+# then plans a path straight through the now-"free" obstacle and the
+# local costmap, which only consumes /scan_raw, doesn't catch it in time
+# -> robot crashes into the furniture. ~±35 deg keeps the depth camera
+# mostly forward (its FOV is ~70 deg so total ArUco coverage is still
+# ~150 deg) without sweeping clearing rays across the global costmap.
+SEARCH_PAN_POSITIONS = [-0.6, 0.6, 0.0]   # rad — left, right, centre
+SEARCH_PAN_DWELL = 1.5                    # seconds per pan position

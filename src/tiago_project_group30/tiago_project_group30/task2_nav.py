@@ -8,10 +8,9 @@
 import math
 
 from rclpy.action import ActionClient
-from rclpy.duration import Duration
 
-from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import DriveOnHeading, NavigateToPose
+from geometry_msgs.msg import PoseStamped, Twist
+from nav2_msgs.action import NavigateToPose
 
 from tiago_project_group30.task2_kdl_helpers import yaw_to_quat, quat_to_yaw
 
@@ -35,21 +34,25 @@ class NavClient:
         # while waiting for the cancel to propagate. Reset on every send.
         self.timeout_fired = False
 
-        # /drive_on_heading is a Nav2 BEHAVIOR action that drives the base
-        # in a straight line by a specified distance, IGNORING the global
-        # costmap (no inflation check). Used in Task 3 to overcome the
-        # 0.7 m inflation_radius that prevents Nav2's NavigateToPose from
-        # parking close enough to the cube on the pick surface.
-        self.drive_client = ActionClient(
-            node, DriveOnHeading, "/drive_on_heading",
-            callback_group=callback_group,
-        )
-        self.drive_active = False
-        self.drive_done = False
-        self.drive_succeeded = False
-        self._drive_goal_handle = None
-        self._drive_pending_send_future = None
-        self._drive_result_future = None
+        # Raw velocity publisher used in Task 3 to close the final gap to
+        # the cube. Nav2's NavigateToPose obeys the 0.7 m inflation_radius
+        # around the pick surface and parks ~1 m short of the cube, outside
+        # the arm workspace. Instead of the fragile /drive_on_heading
+        # behavior (open-loop, costmap-ignoring, easily aborted), the state
+        # machine drives the base forward by publishing Twist here while
+        # closed-loop checking the map->base_link TF, and calls stop() the
+        # instant base_link reaches CUBE_APPROACH_DISTANCE from the cube.
+        #
+        # We publish to /nav_vel (NOT /cmd_vel). On Tiago the base velocity
+        # chain is:
+        #   Nav2 controller -> /cmd_vel -> velocity_smoother -> /nav_vel
+        #   -> twist_mux -> /mobile_base_controller/cmd_vel_unstamped -> base
+        # /cmd_vel only reaches the base while Nav2's velocity_smoother is
+        # actively running a goal; a raw Twist published there when Nav2 is
+        # idle gets swallowed by the smoother (the robot never moves). The
+        # twist_mux navigation input /nav_vel is the topic actually
+        # forwarded to the base controller, so we drive the base there.
+        self.cmd_vel_pub = node.create_publisher(Twist, "/nav_vel", 10)
 
     def send_goal(self, x: float, y: float, yaw: float):
         # Reset flags + drop any stale futures from a previous goal.
@@ -131,83 +134,23 @@ class NavClient:
             self._goal_handle.cancel_goal_async()
 
     # ------------------------------------------------------------------
-    # /drive_on_heading (Nav2 behavior action)
+    # Raw /cmd_vel forward push (closed-loop, driven by the state machine)
     # ------------------------------------------------------------------
-    def send_drive_on_heading(self, distance: float,
-                              speed: float = 0.1,
-                              time_allowance_s: float = 30.0):
-        # target.x is the forward offset in the base-link X direction.
-        # speed in m/s. The action server publishes /cmd_vel internally
-        # so we don't have to manage it ourselves.
-        self.drive_active = True
-        self.drive_done = False
-        self.drive_succeeded = False
-        self._drive_goal_handle = None
-        self._drive_pending_send_future = None
-        self._drive_result_future = None
+    def publish_forward(self, speed: float, angular: float = 0.0):
+        # Drive along base_link +X at `speed` m/s with an optional yaw rate
+        # `angular` rad/s (positive = turn left). The state machine calls
+        # this every tick while it watches the TF pose relative to the
+        # cube; one Twist per tick keeps the base moving. The angular term
+        # lets the push steer toward the cube so the robot ends up frontal
+        # and centered even if Nav2 parked it off-axis.
+        msg = Twist()
+        msg.linear.x = float(speed)
+        msg.angular.z = float(angular)
+        self.cmd_vel_pub.publish(msg)
 
-        if not self.drive_client.wait_for_server(timeout_sec=5.0):
-            self.node.get_logger().error(
-                "Nav2 /drive_on_heading action server not available"
-            )
-            self.drive_done = True
-            self.drive_succeeded = False
-            self.drive_active = False
-            return
-
-        goal_msg = DriveOnHeading.Goal()
-        goal_msg.target.x = float(distance)
-        goal_msg.target.y = 0.0
-        goal_msg.target.z = 0.0
-        goal_msg.speed = float(speed)
-        goal_msg.time_allowance = Duration(seconds=time_allowance_s).to_msg()
-        self.node.get_logger().info(
-            f"/drive_on_heading -> {distance:.2f} m at {speed:.2f} m/s"
-        )
-        self._drive_pending_send_future = self.drive_client.send_goal_async(
-            goal_msg
-        )
-
-    def update_drive_flags(self):
-        # Same polling pattern used for /navigate_to_pose.
-        if (
-            self._drive_pending_send_future is not None
-            and self._drive_pending_send_future.done()
-        ):
-            try:
-                handle = self._drive_pending_send_future.result()
-            except Exception:
-                handle = None
-            self._drive_pending_send_future = None
-            if handle is None or not handle.accepted:
-                self.node.get_logger().warn("Nav2 rejected the drive goal")
-                self.drive_done = True
-                self.drive_succeeded = False
-                self.drive_active = False
-            else:
-                self._drive_goal_handle = handle
-                self._drive_result_future = handle.get_result_async()
-
-        if (
-            self._drive_result_future is not None
-            and self._drive_result_future.done()
-        ):
-            try:
-                status = self._drive_result_future.result().status
-            except Exception:
-                status = 5
-            self._drive_result_future = None
-            self.drive_succeeded = (status == 4)
-            self.drive_done = True
-            self.drive_active = False
-            self.node.get_logger().info(
-                f"/drive_on_heading finished, status={status}, "
-                f"succeeded={self.drive_succeeded}"
-            )
-
-    def cancel_drive(self):
-        if self._drive_goal_handle is not None:
-            self._drive_goal_handle.cancel_goal_async()
+    def stop(self):
+        # Publish a zero Twist to halt the base immediately.
+        self.cmd_vel_pub.publish(Twist())
 
     @staticmethod
     def approach_pose_to_xy_yaw(ps: PoseStamped):

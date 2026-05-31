@@ -192,24 +192,26 @@ class ArucoTracker:
         # CRITICAL: compose into MAP frame NOW, using the camera TF AT
         # THE TIME OF THE DETECTION (msg.header.stamp). This freezes the
         # marker at its true world position.
+        #
+        # We DO NOT fall back to "latest TF" (rclpy.time.Time()) when the
+        # stamped lookup fails. Under heavy CPU load (Gazebo + Nav2 +
+        # MoveIt + ArUco + AMCL) the TF for the detection timestamp can
+        # lag by 100-300 ms. Using the latest TF in that case composes
+        # aruco_in_cam (taken at time T) with map<-cam (computed at time
+        # T - dt, when the robot was elsewhere) -> marker_in_map ends up
+        # offset by however much the robot moved during dt. Empirically
+        # this produced wall-approach poses lying inside the surface
+        # inflation, making Nav2 reject every trajectory in State 4.
         try:
             tf_map_cam = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 self.camera_frame,
                 msg.header.stamp,
-                timeout=Duration(seconds=0.2),
+                timeout=Duration(seconds=0.5),
             )
         except Exception:
-            # Fallback: TF for that exact stamp not available -> latest.
-            try:
-                tf_map_cam = self.tf_buffer.lookup_transform(
-                    self.map_frame,
-                    self.camera_frame,
-                    rclpy.time.Time(),
-                    timeout=Duration(seconds=0.1),
-                )
-            except Exception:
-                return  # no TF available, skip this detection
+            return  # no synced TF -> drop this detection rather than
+                    # silently compose with a stale transform
 
         frame_map_cam = transform_to_kdl_frame(tf_map_cam)
         marker_in_map = frame_map_cam * aruco_in_cam

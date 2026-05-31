@@ -57,7 +57,17 @@ TIAGO_GRIPPER_LINK = "gripper_left_finger_link"
 ##############################
 GRIPPER_JOINT_NAMES = ["gripper_left_finger_joint", "gripper_right_finger_joint"]
 GRIPPER_OPEN_POSITIONS = [0.044, 0.044]   # 8 cm total opening, > 7 cm cube
-GRIPPER_CLOSED_POSITIONS = [0.0, 0.0]
+# Close to FLAT CONTACT on the 7 cm cube, not all the way to 0. At
+# position 0.044 the opening is ~8 cm, so each finger pad sits ~position*
+# 0.909 from the cube centre; flat contact on a 7 cm cube (pad at 3.5 cm)
+# is ~0.0385. We command 0.037 -> ~1.5 mm total preload: the pads press
+# flat on two faces and self-centre the cube without squeezing it.
+# Earlier values were wrong in OPPOSITE ways: 0/0 drove the pads ~7 cm PAST
+# the faces (cube squirts out), and 0.032 over-squeezed the rigid cube by
+# ~1.2 cm, generating large contact forces that SPUN the cube crooked an
+# instant before the IFRA attach froze it. The attach does the real
+# holding, so the fingers only need gentle flat contact.
+GRIPPER_CLOSED_POSITIONS = [0.037, 0.037]
 GRIPPER_GROUP_NAME = "gripper"
 GRIPPER_COMMAND_ACTION_NAME = "gripper_controller/joint_trajectory"
 
@@ -81,28 +91,64 @@ DETACH_LINK_SERVICE = "/DETACHLINK"
 #     center height, clear of the support surface.
 # The MoveIt2 end-effector is `gripper_grasping_frame` (tiago_arm.py).
 #
+# Height of the gripper_grasping_frame above the cube's TOP face at the
+# grasp pose. The Tiago fingers are long (~0.10 m of fingertip BELOW the
+# grasping_frame along the approach axis), so a top-down grasp aimed at the
+# cube center drove the fingertips below the cube base and into the table
+# top. Raising the target so the grasping_frame sits this far ABOVE the
+# cube top keeps the fingertips around the cube's upper body instead of
+# punching through the table. Tune to taste (cube is 7 cm tall).
+GRASP_Z_ABOVE_TOP = 0.04   # meters above the cube top face
+
 # Pre-grasp = same XY as cube, lifted vertically by this much (arm hovers
 # above, then descends straight down to the grasp pose):
-PRE_GRASP_LIFT = 0.20   # meters above the cube CENTER
+PRE_GRASP_LIFT = 0.25   # meters above the cube CENTER (increased from 0.10)
+
+# Yaw tweak added to the cube marker's own yaw when orienting the gripper.
+# The finger opening axis (grasping_frame Y) is set parallel to a pair of
+# cube faces via the marker yaw. At offset 0 the fingers came down ALIGNED
+# WITH THE ROBOT'S X AXIS (the approach line), so one finger descended onto
+# the near face and rammed the cube. pi/2 rotates the opening axis 90 deg so
+# the two fingers straddle the LEFT/RIGHT faces and the cube drops into the
+# gap between them.
+CUBE_GRASP_YAW_OFFSET = 1.5707963267948966   # radians (pi/2)
 
 # Post-grasp / carry: lift the cube up before navigating away.
 POST_GRASP_LIFT = 0.20  # meters above the cube CENTER
 
 # Place-side geometry: the cube is dropped on the place surface. The place
-# surface top (env_exam_place_surface) is at z ~ 0.30 m, so dropping the
-# cube CENTER at z = 0.30 + cube_half + small clearance lands it cleanly.
+# surface top (env_exam_place_surface) is at z ~ 0.30 m.
 PLACE_SURFACE_TOP_Z = 0.30      # meters (env_exam_place_surface top)
 PLACE_DROP_CLEARANCE = 0.02     # safety margin so we don't slam the surface
-# Since we grasp at cube_top - 0.01 (0.04 from bottom), the gripper grasping frame
-# must be at Z = surface + 0.04 + clearance for drop.
-PLACE_TARGET_Z = PLACE_SURFACE_TOP_Z + 0.04 + PLACE_DROP_CLEARANCE
+# PLACE_TARGET_Z is the gripper_grasping_frame height (map Z) at the drop.
+# It MUST be consistent with how the grasp holds the cube: at grasp time the
+# grasping_frame sits GRASP_Z_ABOVE_TOP above the cube top face, so the cube
+# center is (GRASP_Z_ABOVE_TOP + CUBE_TOP_TO_CENTER) BELOW the grasping_frame.
+# To rest the cube bottom on the surface (+ clearance):
+#   grasping_frame_z = surface + clearance + CUBE_SIDE + GRASP_Z_ABOVE_TOP
+# The old value (surface + 0.04 + clearance = 0.36) was tuned for a DIFFERENT
+# grasp offset; at 0.36 the fingertips (~0.10 m below) and the held cube ended
+# up BELOW the 0.30 m surface top, so the DROP goal collided with the table
+# and OMPL reported "Unable to sample any valid states for goal tree".
+PLACE_TARGET_Z = (
+    PLACE_SURFACE_TOP_Z + PLACE_DROP_CLEARANCE + CUBE_SIDE + GRASP_Z_ABOVE_TOP
+)
 
-# Forward offset in front of the PLACE approach pose where the cube is set
-# down (measured from the robot toward the marker). The robot stops at
-# APPROACH_DISTANCE = 0.55 m in front of the place wall, so 0.45 m forward
-# lands the cube ~10 cm shy of the wall -- on the surface, not pressed
-# against it.
-PLACE_FORWARD_OFFSET = 0.45    # meters
+# Forward offset from the robot's CURRENT base (see _precompute_drop_poses)
+# where the cube is set down. With the base ~PLACE_APPROACH_DISTANCE (0.60 m)
+# from the place wall after the push, 0.55 m forward lands the cube ~5 cm
+# shy of the wall -- on the surface. 0.45 m left it ~15 cm from the wall,
+# just short of the surface edge (cube dropped in front of the table).
+# Still inside arm reach (the pick worked at ~0.68 m forward).
+PLACE_FORWARD_OFFSET = 0.65    # meters
+
+# Like the pick side, Nav2 parks short of the place wall because of
+# inflation, leaving the robot too far to set the cube on the surface.
+# After State 5 reaches the PLACE approach, State 27 (in "place" mode)
+# pushes the base toward the PLACE WALL MARKER (aruco.place_marker_in_map),
+# steering frontal, until base_link is within this distance of it -- the
+# same closed-loop engine used for the pick cube approach.
+PLACE_APPROACH_DISTANCE = 0.65  # meters between base_link and place wall marker
 
 ##############################
 # Head tilt
@@ -122,16 +168,30 @@ HEAD_SCAN_PANS = [0.0, -1.3, 1.3]   # rad
 HEAD_SCAN_DWELL = 3.0                          # seconds per pan position
 
 ##############################
-# Cube approach (refined Nav2 goal + drive_on_heading push)
+# Cube approach (refined Nav2 goal + closed-loop /cmd_vel push)
 ##############################
-# After the first cube detection we navigate to a pose at this distance
-# in front of the cube and pointing at it. Nav2's NavigateToPose obeys
-# inflation_radius (0.7 m around the pick surface) and therefore cannot
-# park closer than ~1 m to the cube -- so the planner stops short, and
-# we close the remaining gap using Nav2's behavior action
-# /drive_on_heading (which ignores the costmap) until base_link is
-# actually CUBE_APPROACH_DISTANCE m from the cube center. The value is
-# chosen so the cube falls inside Tiago's arm workspace (~0.92 m max
-# horizontal reach at the cube's height of 0.34 m).
-CUBE_APPROACH_DISTANCE = 0.85   # meters between base_link and cube center XY
-DRIVE_SPEED = 0.05          # m/s for the drive_on_heading push
+# After the first cube detection we navigate (NavigateToPose) to a pose
+# SAFE_NAV_DISTANCE m in front of the cube. Nav2 obeys inflation_radius
+# (0.7 m around the pick surface) and cannot park closer than ~1 m -- so
+# we close the remaining gap with a closed-loop /cmd_vel push (State 27):
+# the state machine drives the base forward while watching the
+# map->base_link TF and stops the instant base_link is within
+# CUBE_APPROACH_DISTANCE m of the cube center. That value is chosen so the
+# cube falls inside Tiago's arm workspace (~0.92 m max horizontal reach at
+# the cube's height of 0.34 m).
+# Sweet spot between two failure modes, now that State 27 steers the base
+# FRONTAL to the cube (no lateral offset):
+#   - too close (<0.65) -> the top-down arm sweeps its elbow into the front
+#     edge of the pick table while descending.
+#   - too far  (0.75)   -> the centered cube lands ~0.82 m forward, at the
+#     edge of the arm's forward reach, and OMPL can't sample a valid
+#     pre-grasp ("Unable to sample any valid states for goal tree").
+# 0.65 m puts the cube ~0.72 m forward: clear of the table edge AND
+# comfortably inside Tiago's ~0.92 m max horizontal reach. The earlier
+# table strike at 0.65 was caused by the SKEWED approach (cube off to the
+# side -> arm reaching sideways), which the State 27 steering term fixes.
+CUBE_APPROACH_DISTANCE = 0.70   # meters between base_link and cube center XY
+DRIVE_SPEED = 0.15          # m/s for the /nav_vel forward push (0.05 was far
+                            # too timid: the smoother/mux ramps it down, so the
+                            # base crawled ~0.016 m/s and never closed the gap)
+SAFE_NAV_DISTANCE = 1.1   # Nav2 goal is this far from the cube, then we push the last bit

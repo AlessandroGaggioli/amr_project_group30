@@ -128,7 +128,16 @@ class CubeTracker:
         if already_have and new_distance >= prev_distance:
             return
 
-        # Compose into map AT THE TIME OF THE DETECTION (avoid drift).
+        # Compose into map. We PREFER the TF at the exact detection stamp
+        # (composing aruco_in_cam at time T with map<-cam at T-dt would
+        # inject the distance the robot moved during dt). But under heavy
+        # CPU load (Gazebo + MoveIt + Nav2) the stamped TF routinely lags
+        # past the 0.5 s timeout, and a strict same-stamp lookup then drops
+        # EVERY detection for tens of seconds (the "waiting for cube...
+        # then mysteriously sees it" stall). During cube detection the base
+        # is parked still at the approach pose, so a small TF time mismatch
+        # causes negligible drift -- if the stamped lookup fails we fall
+        # back to the latest available TF instead of dropping the frame.
         try:
             tf_map_cam = self.tf_buffer.lookup_transform(
                 self.map_frame,
@@ -142,7 +151,7 @@ class CubeTracker:
                     self.map_frame,
                     self.camera_frame,
                     rclpy.time.Time(),
-                    timeout=Duration(seconds=0.1),
+                    timeout=Duration(seconds=0.2),
                 )
             except Exception:
                 return

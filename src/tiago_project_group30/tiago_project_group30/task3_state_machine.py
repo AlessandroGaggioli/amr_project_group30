@@ -26,20 +26,23 @@ from PyKDL import Frame, Rotation, Vector
 from tiago_project_group30.task2_kdl_helpers import transform_to_kdl_frame
 from tiago_project_group30.task3_constants import (
     CUBE_APPROACH_DISTANCE,
+    CUBE_GRASP_YAW_OFFSET,
+    SAFE_NAV_DISTANCE,
     CUBE_PICK_SEQUENCE,
     CUBE_TOP_TO_CENTER,
     DRIVE_SPEED,
-    HEAD_SCAN_DWELL,
-    HEAD_SCAN_PANS,
+    GRASP_Z_ABOVE_TOP,
     HEAD_TILT_DOWN_FOR_CUBE,
+    PLACE_APPROACH_DISTANCE,
     PLACE_FORWARD_OFFSET,
     PLACE_TARGET_Z,
     POST_GRASP_LIFT,
     PRE_GRASP_LIFT,
 )
+from tiago_project_group30.common_states import CommonStates
 
 
-class Task3StateMachine:
+class Task3StateMachine(CommonStates):
     def __init__(self, node, arm, nav, amcl, aruco, sampler,
                  gripper, link_attacher, cube_tracker, tf_buffer):
         self.node = node
@@ -61,8 +64,6 @@ class Task3StateMachine:
 
         # Task 3 progress tracking.
         self._current_cube_idx = 0   # index into CUBE_PICK_SEQUENCE
-        # State 11 head-scan progress (index into HEAD_SCAN_PANS).
-        self._scan_idx = 0
         # One-shot latch: True after we have navigated to the cube
         # approach pose (so re-entering State 11 with a fresh marker
         # goes straight to grasping instead of looping nav forever).
@@ -77,6 +78,9 @@ class Task3StateMachine:
         self._drop_pose_quat = None
         self._pre_drop_pose_pos = None
         self._pre_drop_pose_quat = None
+        # "pick" or "place": selects the reference frame and stop distance
+        # used by the shared push (State 27) and back_out (State 28) states.
+        self._push_mode = "pick"
 
     @property
     def current_cube_id(self) -> int:
@@ -92,9 +96,8 @@ class Task3StateMachine:
         time.sleep(10.0)
 
         PLANNING_TIMEOUT = 6.0
-        SEARCH_NAV_TIMEOUT = 25.0
+        SEARCH_NAV_TIMEOUT = 120.0
         APPROACH_NAV_TIMEOUT = 180.0
-        SEARCH_SPIN_TIMEOUT = 15.0
         # Task 3-side timeouts.
         ARM_MOTION_TIMEOUT = 20.0       # MoveIt2 plan+execute per arm goal
         GRIPPER_TIMEOUT = 5.0
@@ -105,71 +108,70 @@ class Task3StateMachine:
             try:
                 self.arm.update_flags()
                 self.nav.update_flags()
-                self.nav.update_drive_flags()
                 self.amcl.update_spin_flags()
                 self.amcl.update_amcl_flags()
                 self.gripper.update_flags()
 
                 if self.state == 0:
-                    self._tick_state_0_arm_tuck()
+                    self.state_0_arm_tuck()
                 elif self.state == 1:
-                    self._tick_state_1_wait_arm(PLANNING_TIMEOUT)
+                    self.state_1_wait_arm(PLANNING_TIMEOUT)
                 elif self.state == 2:
-                    self._tick_state_2_amcl_localization()
+                    self.state_2_amcl_localization()
                 elif self.state == 3:
-                    if self._tick_state_3_random_search(
-                        SEARCH_NAV_TIMEOUT, SEARCH_SPIN_TIMEOUT
-                    ):
+                    if self.state_3_random_search(SEARCH_NAV_TIMEOUT):
                         continue
                 elif self.state == 4:
-                    if self._tick_state_4_pick(APPROACH_NAV_TIMEOUT):
+                    if self.state_4_pick(APPROACH_NAV_TIMEOUT):
                         continue
                 elif self.state == 5:
-                    if self._tick_state_5_place(APPROACH_NAV_TIMEOUT):
+                    if self.state_5_place(APPROACH_NAV_TIMEOUT):
                         continue
                 elif self.state == 6:
-                    self._tick_state_6_done()
+                    self.state_6_done()
                     break
 
                 # ---- Task 3 pick sub-flow ----
                 elif self.state == 10:
-                    self._tick_state_10_head_tilt(CUBE_DETECTION_TIMEOUT)
+                    self.state_10_head_tilt(CUBE_DETECTION_TIMEOUT)
                 elif self.state == 11:
-                    self._tick_state_11_wait_cube_visible(CUBE_DETECTION_TIMEOUT)
+                    self.state_11_wait_cube_visible(CUBE_DETECTION_TIMEOUT)
                 elif self.state == 12:
-                    self._tick_state_12_open_gripper_pre_grasp(GRIPPER_TIMEOUT)
+                    self.state_12_open_gripper_pre_grasp(GRIPPER_TIMEOUT)
                 elif self.state == 13:
-                    self._tick_state_13_arm_pre_grasp(ARM_MOTION_TIMEOUT)
+                    self.state_13_arm_pre_grasp(ARM_MOTION_TIMEOUT)
                 elif self.state == 14:
-                    self._tick_state_14_arm_grasp(ARM_MOTION_TIMEOUT)
+                    self.state_14_arm_grasp(ARM_MOTION_TIMEOUT)
                 elif self.state == 15:
-                    self._tick_state_15_close_gripper(GRIPPER_TIMEOUT)
+                    self.state_15_close_gripper(GRIPPER_TIMEOUT)
                 elif self.state == 16:
-                    self._tick_state_16_attach(ATTACH_TIMEOUT)
+                    self.state_16_attach(ATTACH_TIMEOUT)
                 elif self.state == 17:
-                    self._tick_state_17_arm_lift_after_grasp(ARM_MOTION_TIMEOUT)
+                    self.state_17_arm_lift_after_grasp(ARM_MOTION_TIMEOUT)
                 elif self.state == 18:
-                    self._tick_state_18_arm_carry(ARM_MOTION_TIMEOUT)
+                    self.state_18_arm_carry(ARM_MOTION_TIMEOUT)
                 elif self.state == 19:
-                    self._tick_state_19_wait_cube_nav(APPROACH_NAV_TIMEOUT)
+                    self.state_19_wait_cube_nav(APPROACH_NAV_TIMEOUT)
 
                 # ---- Task 3 drop sub-flow ----
                 elif self.state == 20:
-                    self._tick_state_20_arm_pre_drop(ARM_MOTION_TIMEOUT)
+                    self.state_20_arm_pre_drop(ARM_MOTION_TIMEOUT)
                 elif self.state == 21:
-                    self._tick_state_21_arm_drop(ARM_MOTION_TIMEOUT)
+                    self.state_21_arm_drop(ARM_MOTION_TIMEOUT)
                 elif self.state == 22:
-                    self._tick_state_22_open_gripper_release(GRIPPER_TIMEOUT)
+                    self.state_22_open_gripper_release(GRIPPER_TIMEOUT)
                 elif self.state == 23:
-                    self._tick_state_23_detach(ATTACH_TIMEOUT)
+                    self.state_23_detach(ATTACH_TIMEOUT)
                 elif self.state == 24:
-                    self._tick_state_24_arm_lift_after_drop(ARM_MOTION_TIMEOUT)
+                    self.state_24_arm_lift_after_drop(ARM_MOTION_TIMEOUT)
                 elif self.state == 25:
-                    self._tick_state_25_arm_carry_back(ARM_MOTION_TIMEOUT)
+                    self.state_25_arm_carry_back(ARM_MOTION_TIMEOUT)
                 elif self.state == 26:
-                    self._tick_state_26_next_or_done()
+                    self.state_26_next_or_done()
                 elif self.state == 27:
-                    self._tick_state_27_wait_drive_on_heading()
+                    self.state_27_cmd_vel_push()
+                elif self.state == 28:
+                    self.state_28_back_out()
 
             except Exception as e:
                 import traceback
@@ -179,202 +181,14 @@ class Task3StateMachine:
 
             time.sleep(0.05)
 
-    # ==================================================================
-    # States 0-3: same as Task 2.
-    # ==================================================================
-    def _tick_state_0_arm_tuck(self):
-        self.node.get_logger().info("State 0: tuck arm to HOME (MoveIt)")
-        self.arm.move_to_home(tilt_head=True)
-        self._send_time = time.time()
-        self.state = 1
-
-    def _tick_state_1_wait_arm(self, planning_timeout):
-        if self.arm.motion_done:
-            self.node.get_logger().info(
-                "Arm at HOME, starting AMCL global localization"
-            )
-            self.state = 2
-        elif (
-            not self.arm.motion_started
-            and (time.time() - self._send_time) > planning_timeout
-        ):
-            self.node.get_logger().warn("Arm planning timed out, retrying")
-            self.state = 0
-
-    def _tick_state_2_amcl_localization(self):
-        amcl = self.amcl
-        if amcl.loc_substate == 0:
-            self.node.get_logger().info(
-                "State 2a: requesting AMCL global localization"
-            )
-            if amcl.request_global_localization():
-                time.sleep(2.0)
-                amcl.loc_substate = 1
-            else:
-                time.sleep(2.0)
-        elif amcl.loc_substate == 1:
-            self.node.get_logger().info(
-                "State 2b: clearing local costmap before spin"
-            )
-            amcl.clear_local_costmap()
-            time.sleep(0.5)
-            amcl.loc_substate = 2
-        elif amcl.loc_substate == 2:
-            amcl.localization_spin_count += 1
-            self.node.get_logger().info(
-                f"State 2c: spin attempt "
-                f"#{amcl.localization_spin_count} (target_yaw=2*pi)"
-            )
-            amcl.send_spin(2.0 * math.pi)
-            self._send_time = time.time()
-            amcl.loc_substate = 3
-        elif amcl.loc_substate == 3:
-            if amcl.converged:
-                self.node.get_logger().info(
-                    "State 2d: AMCL aligned -- proceeding to search"
-                )
-                if amcl.spin_active and amcl.spin_goal_handle is not None:
-                    amcl.cancel_spin()
-                self.state = 3
-                return
-            if amcl.spin_done:
-                if amcl.localization_spin_count >= 3:
-                    self.node.get_logger().warn(
-                        f"AMCL not converged after "
-                        f"{amcl.localization_spin_count} spins, "
-                        "proceeding anyway"
-                    )
-                    self.state = 3
-                    return
-                self.node.get_logger().info(
-                    "Spin done, AMCL not converged yet -- "
-                    "clearing costmap and re-spinning"
-                )
-                amcl.spin_done = False
-                amcl.loc_substate = 1
-
-    def _tick_state_3_random_search(self, search_nav_timeout, search_spin_timeout):
-        amcl = self.amcl
-        nav = self.nav
-        aruco = self.aruco
-
-        if (
-            aruco.pick_approach_pose is not None
-            and aruco.place_approach_pose is not None
-        ):
-            if nav.goal_active:
-                self.node.get_logger().info(
-                    "Both markers seen mid-search, cancelling nav"
-                )
-                nav.cancel()
-            if amcl.spin_active and amcl.spin_goal_handle is not None:
-                self.node.get_logger().info(
-                    "Both markers seen mid-spin, cancelling spin"
-                )
-                amcl.cancel_spin()
-            nav.goal_active = False
-            nav.goal_done = False
-            nav.goal_succeeded = False
-            amcl.spin_active = False
-            amcl.spin_done = False
-            amcl.spin_succeeded = False
-            self.search_phase = "sample"
-            aruco.freeze()
-            self.node.get_logger().info(
-                f"Freezing PICK approach at "
-                f"({aruco.pick_approach_pose.pose.position.x:.2f}, "
-                f"{aruco.pick_approach_pose.pose.position.y:.2f}) and "
-                f"PLACE approach at "
-                f"({aruco.place_approach_pose.pose.position.x:.2f}, "
-                f"{aruco.place_approach_pose.pose.position.y:.2f})"
-            )
-            self.state = 4
-            return True
-
-        if self.search_phase == "nav" and nav.goal_done:
-            nav_ok = nav.goal_succeeded
-            nav.goal_done = False
-            if nav_ok:
-                self.node.get_logger().info(
-                    "Waypoint reached, sending Spin 2*pi"
-                )
-                amcl.send_spin(2.0 * math.pi)
-                self.search_phase = "spin"
-                self._send_time = time.time()
-            else:
-                self.node.get_logger().warn(
-                    "Waypoint nav failed -> sampling next"
-                )
-                self.search_phase = "sample"
-
-        if self.search_phase == "spin" and amcl.spin_done:
-            spin_ok = amcl.spin_succeeded
-            amcl.spin_done = False
-            if not spin_ok:
-                self.node.get_logger().warn(
-                    "Waypoint spin aborted -> sampling next"
-                )
-            self.search_phase = "sample"
-
-        if self.search_phase == "nav" and nav.goal_active:
-            if (
-                not nav.timeout_fired
-                and (time.time() - self._send_time) > search_nav_timeout
-            ):
-                self.node.get_logger().warn(
-                    "Nav goal timed out, cancelling -> sample next"
-                )
-                nav.cancel()
-                nav.timeout_fired = True
-            return True
-
-        if self.search_phase == "spin" and amcl.spin_active:
-            if (
-                not nav.timeout_fired
-                and (time.time() - self._send_time) > search_spin_timeout
-            ):
-                self.node.get_logger().warn(
-                    "Spin timed out, cancelling -> sample next"
-                )
-                amcl.cancel_spin()
-                nav.timeout_fired = True
-            return True
-
-        if self.search_phase == "sample":
-            if self.sampler.costmap_msg is None:
-                self.node.get_logger().info(
-                    "Waiting for /global_costmap/costmap...",
-                    throttle_duration_sec=2.0,
-                )
-                time.sleep(0.5)
-                return True
-            xy = self.sampler.sample_random_xy()
-            if xy is None:
-                self.node.get_logger().warn(
-                    "Sample returned None, clearing visited "
-                    "list and retrying",
-                    throttle_duration_sec=2.0,
-                )
-                self.sampler.visited_waypoints = []
-                time.sleep(0.5)
-                return True
-            x, y = xy
-            self.sampler.visited_waypoints.append((x, y))
-            self.node.get_logger().info(
-                f"New random waypoint ({x:.2f}, {y:.2f}); "
-                f"visited={len(self.sampler.visited_waypoints)}"
-            )
-            nav.send_goal(x, y, 0.0)
-            self.search_phase = "nav"
-            self._send_time = time.time()
-        return False
+    
 
     # ==================================================================
     # State 4: navigate to PICK approach.
     # CHANGE vs. Task 2: on goal_succeeded, advance to State 10 (cube
     # pick sub-flow) instead of State 5 (PLACE nav).
     # ==================================================================
-    def _tick_state_4_pick(self, approach_nav_timeout):
+    def state_4_pick(self, approach_nav_timeout):
         nav = self.nav
         if nav.goal_done:
             nav.goal_done = False
@@ -418,15 +232,19 @@ class Task3StateMachine:
     # CHANGE vs. Task 2: on goal_succeeded, advance to State 20 (cube
     # drop sub-flow) instead of State 6 (done).
     # ==================================================================
-    def _tick_state_5_place(self, approach_nav_timeout):
+    def state_5_place(self, approach_nav_timeout):
         nav = self.nav
         if nav.goal_done:
             nav.goal_done = False
             if nav.goal_succeeded:
                 self.node.get_logger().info(
-                    "PLACE approach reached, starting Task 3 drop"
+                    "PLACE approach reached, pushing closer to the surface"
                 )
-                self.state = 20
+                # Reuse the shared push (State 27) in "place" mode: drive
+                # toward the place wall marker, then -> drop (State 20).
+                self._push_mode = "place"
+                self._send_time = time.time()
+                self.state = 27
                 return True
             else:
                 self.node.get_logger().warn(
@@ -458,31 +276,33 @@ class Task3StateMachine:
     # ==================================================================
     # State 6: done.
     # ==================================================================
-    def _tick_state_6_done(self):
+    def state_6_done(self):
         self.node.get_logger().info("State 6: Task 3 completed")
         self.finished = True
 
     # ==================================================================
     # Task 3 PICK sub-flow (states 10-18)
     # ==================================================================
-    def _tick_state_10_head_tilt(self, detection_timeout):
+    def state_10_head_tilt(self, detection_timeout):
         # Enable the CubeTracker only NOW: during Task 2 random search
         # the camera could glimpse a cube from far/oblique angle and
         # store a noisy PnP that State 11 would reuse before the head
         # finishes tilting.
         self.cube_tracker.enable()
-        # Reset the head scan to the first pan position.
-        self._scan_idx = 0
-        pan = HEAD_SCAN_PANS[0]
+        # Single tilt straight down, no pan (no scan). The wall-marker
+        # approach already aligns the robot with the surface, so the
+        # cube should be in front; the strict TF-sync filter in the
+        # cube tracker will drop the first few noisy detections during
+        # head motion and accept the first synced one once the head
+        # settles.
         self.node.get_logger().info(
-            f"State 10: tilt={HEAD_TILT_DOWN_FOR_CUBE} rad, "
-            f"pan={pan:.2f} rad (scan pos 1/{len(HEAD_SCAN_PANS)})"
+            f"State 10: tilt={HEAD_TILT_DOWN_FOR_CUBE} rad, pan=0.0 rad"
         )
-        self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, pan)
+        self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, 0.0)
         self._send_time = time.time()
         self.state = 11
 
-    def _tick_state_11_wait_cube_visible(self, detection_timeout):
+    def state_11_wait_cube_visible(self, detection_timeout):
         cube_id = self.current_cube_id
         marker = self.cube_tracker.cube_marker_in_map[cube_id]
         if marker is not None:
@@ -518,31 +338,16 @@ class Task3StateMachine:
                 return
             self.state = 12
             return
-        # Cube not yet detected from this head pan. Dwell HEAD_SCAN_DWELL
-        # seconds per pan position; if nothing comes, step the head pan.
-        elapsed = time.time() - self._send_time
-        if elapsed > HEAD_SCAN_DWELL:
-            self._scan_idx += 1
-            if self._scan_idx >= len(HEAD_SCAN_PANS):
-                self.node.get_logger().warn(
-                    f"Full head scan finished without seeing cube ID "
-                    f"{cube_id}; restarting scan from center"
-                )
-                self._scan_idx = 0
-            pan = HEAD_SCAN_PANS[self._scan_idx]
-            self.node.get_logger().info(
-                f"Cube not yet seen, panning head to {pan:.2f} rad "
-                f"(scan pos {self._scan_idx + 1}/{len(HEAD_SCAN_PANS)})"
-            )
-            self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, pan)
-            self._send_time = time.time()
-            return
+        # No marker yet -- keep waiting at the current head pose. We do
+        # NOT re-tilt or pan: the head is already centered+tilted from
+        # State 10, and any motion would just invalidate the next batch
+        # of synced TF detections. Just throttle the log.
         self.node.get_logger().info(
             f"Waiting for cube ID {cube_id} to enter FOV...",
             throttle_duration_sec=2.0,
         )
 
-    def _tick_state_12_open_gripper_pre_grasp(self, gripper_timeout):
+    def state_12_open_gripper_pre_grasp(self, gripper_timeout):
         self.node.get_logger().info("State 12: opening gripper before approach")
         self.gripper.open()
         self._send_time = time.time()
@@ -553,7 +358,7 @@ class Task3StateMachine:
         time.sleep(1.0)
         self.state = 13
 
-    def _tick_state_13_arm_pre_grasp(self, arm_timeout):
+    def state_13_arm_pre_grasp(self, arm_timeout):
         if not self._arm_goal_sent_for_state(13):
             self.node.get_logger().info(
                 "State 13: arm to PRE-GRASP (above cube)"
@@ -574,7 +379,7 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_14_arm_grasp(self, arm_timeout):
+    def state_14_arm_grasp(self, arm_timeout):
         if not self._arm_goal_sent_for_state(14):
             self.node.get_logger().info(
                 "State 14: arm to GRASP (cube center)"
@@ -595,16 +400,41 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_15_close_gripper(self, gripper_timeout):
-        self.node.get_logger().info("State 15: closing gripper around cube")
-        self.gripper.close()
-        # Visible delay before the attach so the user can see the fingers
-        # closing in Gazebo before the link becomes rigid.
-        time.sleep(1.0)
-        self.state = 16
-        self._send_time = time.time()
+    def state_15_close_gripper(self, gripper_timeout):
+        # WAIT for the fingers to FINISH closing before advancing to the
+        # attach (State 16). The old version fired gripper.close() then
+        # slept a fixed 1.0 s and moved on -- but the close takes ~3.6 s in
+        # Gazebo, so the IFRA attach rigidly bolted the cube to the finger
+        # while the fingers were still mid-travel and not yet settled on
+        # the cube. The fixed-joint constraint then fought the prismatic
+        # finger joint, Gazebo blew up the contact forces (the cube
+        # "glitching"), and because the cube is now rigidly tied to the
+        # robot those forces propagated into the base, making it thrash.
+        # Polling action_done lets the grip settle physically first.
+        if not self._arm_goal_sent_for_state(15):
+            self.node.get_logger().info("State 15: closing gripper around cube")
+            self.gripper.close()
+            self._mark_arm_goal_sent(15)
+            self._send_time = time.time()
+            return
+        if self.gripper.action_done:
+            # Brief settle so the contact stabilises before the link
+            # becomes rigid.
+            time.sleep(0.5)
+            self.state = 16
+            self._clear_arm_goal_sent()
+            self._send_time = time.time()
+            return
+        if (time.time() - self._send_time) > gripper_timeout:
+            self.node.get_logger().warn(
+                "Gripper close timed out; attaching anyway"
+            )
+            self.state = 16
+            self._clear_arm_goal_sent()
+            self._send_time = time.time()
+            return
 
-    def _tick_state_16_attach(self, attach_timeout):
+    def state_16_attach(self, attach_timeout):
         if not self._arm_goal_sent_for_state(16):
             self.link_attacher.attach(self.current_cube_id)
             self._mark_arm_goal_sent(16)
@@ -623,7 +453,7 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_17_arm_lift_after_grasp(self, arm_timeout):
+    def state_17_arm_lift_after_grasp(self, arm_timeout):
         if not self._arm_goal_sent_for_state(17):
             self.node.get_logger().info(
                 "State 17: lifting arm (back to pre-grasp height)"
@@ -635,6 +465,7 @@ class Task3StateMachine:
             self._mark_arm_goal_sent(17)
             self._send_time = time.time()
             return
+        self._log_gripper_z("State17-lift")
         if self.arm.motion_done:
             self.state = 18
             self._clear_arm_goal_sent()
@@ -644,7 +475,27 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_18_arm_carry(self, arm_timeout):
+    def _log_gripper_z(self, tag):
+        # Diagnostic: log the gripper_grasping_frame height (and the
+        # fingertip height ~0.10 m below it along the downward approach)
+        # in map while the arm carries the attached cube, so we can see
+        # whether the cube/fingers dip toward the table during lift/tuck.
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                "map", "gripper_grasping_frame",
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.1),
+            )
+        except Exception:
+            return
+        gz = tf.transform.translation.z
+        self.node.get_logger().info(
+            f"[diag {tag}] gripper_grasping_frame z={gz:.3f} m "
+            f"(fingertips ~{gz - 0.10:.3f} m); table top ~0.30 m",
+            throttle_duration_sec=0.5,
+        )
+
+    def state_18_arm_carry(self, arm_timeout):
         # Tuck arm to HOME so navigation isn't obstructed by an
         # extended arm. The cube stays attached -- HOME keeps the
         # gripper inside the robot's footprint while carrying.
@@ -656,15 +507,24 @@ class Task3StateMachine:
             self._mark_arm_goal_sent(18)
             self._send_time = time.time()
             return
+        self._log_gripper_z("State18-tuck")
         if self.arm.motion_done:
-            self.node.get_logger().info("Carry config ready -> nav to PLACE")
+            self.node.get_logger().info(
+                "Carry config ready -> backing out of pick zone"
+            )
+            # Raise the head back to level: it was tilted down to see the
+            # cube, and a level head looks tidier (and frees the depth FOV)
+            # for the drive to PLACE. Fire-and-forget on the head controller.
+            self.arm.tilt_head(0.0, 0.0)
             self._clear_arm_goal_sent()
-            # Make sure nav is in a clean state before state 5.
-            self.nav.goal_active = False
-            self.nav.goal_done = False
-            self.nav.goal_succeeded = False
-            self.nav.timeout_fired = False
-            self.state = 5
+            # State 27's forward push parked us ~CUBE_APPROACH_DISTANCE m
+            # from the cube -- INSIDE the pick surface's inflation_radius.
+            # Planning the PLACE route from there fails and Nav2 thrashes
+            # through recovery. back_out (State 28, "pick" mode) reverses to
+            # SAFE_NAV_DISTANCE first, then hands off to the PLACE nav.
+            self._push_mode = "pick"
+            self._send_time = time.time()
+            self.state = 28
             return
         if (time.time() - self._send_time) > arm_timeout:
             self.node.get_logger().warn("Arm tuck timed out, retrying")
@@ -677,20 +537,21 @@ class Task3StateMachine:
     # front of the cube, base facing the cube). Triggered once per cube
     # from State 11 on first detection.
     # ==================================================================
-    def _tick_state_19_wait_cube_nav(self, approach_nav_timeout):
+    def state_19_wait_cube_nav(self, approach_nav_timeout):
         nav = self.nav
         if nav.goal_done:
             nav.goal_done = False
             if nav.goal_succeeded:
                 self.node.get_logger().info(
                     "Cube approach Nav2 reached (within inflation limit); "
-                    "pushing remaining gap with /drive_on_heading"
+                    "closing remaining gap with a /cmd_vel push"
                 )
                 # Re-tilt head straight down so the closer detection is
                 # captured while we push the base forward.
                 self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, 0.0)
                 time.sleep(1.0)
-                self._send_drive_on_heading_to_cube()
+                self._push_mode = "pick"
+                self._send_time = time.time()
                 self.state = 27
                 return
             self.node.get_logger().warn(
@@ -712,85 +573,119 @@ class Task3StateMachine:
             return
 
     # ==================================================================
-    # State 27: wait for the /drive_on_heading push that bridges the gap
-    # left by Nav2's inflation_radius. On success we hand control back
-    # to State 11 to compute grasp poses from the refined cube position.
+    # State 27: closed-loop /cmd_vel push toward a reference frame,
+    # steering frontal, used for BOTH the pick and the place approach
+    # (selected by self._push_mode). Nav2's inflation_radius leaves the
+    # base parked too far from the target; this drives the remaining gap
+    # while nulling the heading error so the robot arrives frontal.
+    #   pick  -> toward the cube marker, stop within CUBE_APPROACH_DISTANCE,
+    #            then grasp (State 11).
+    #   place -> toward the place wall marker, stop within
+    #            PLACE_APPROACH_DISTANCE, then drop (State 20).
     # ==================================================================
-    def _tick_state_27_wait_drive_on_heading(self):
-        nav = self.nav
-        DRIVE_TIMEOUT = 25.0
-        if nav.drive_done:
-            nav.drive_done = False
-            if nav.drive_succeeded:
-                self.node.get_logger().info(
-                    "drive_on_heading finished, robot now in arm range"
-                )
+    def state_27_cmd_vel_push(self):
+        is_pick = self._push_mode != "place"
+        ref = self._push_reference_xy()
+        if ref is None:
+            self.node.get_logger().warn(
+                f"push ({self._push_mode}): reference marker missing, "
+                "proceeding anyway"
+            )
+            self.nav.stop()
+            if is_pick:
+                self._cube_approached = True
+                self.state = 11
             else:
-                self.node.get_logger().warn(
-                    "drive_on_heading did not succeed; attempting grasp anyway"
-                )
-            self._cube_approached = True
-            # Brief settle so the cube tracker has fresh detections at
-            # the new (closer) range before _precompute_grasp_poses runs.
-            time.sleep(1.5)
-            self.state = 11
-            return
-        if nav.drive_active:
-            if (time.time() - self._send_time) > DRIVE_TIMEOUT:
-                self.node.get_logger().warn(
-                    "drive_on_heading timed out, cancelling"
-                )
-                nav.cancel_drive()
+                self.state = 20
             return
 
-    def _send_drive_on_heading_to_cube(self):
-        # Compute how much further forward the base must travel to end
-        # up CUBE_APPROACH_DISTANCE m from the cube. The drive_on_heading
-        # action drives in a straight line along the robot's current X
-        # axis (the State 19 nav set yaw to face the cube, so X = cube
-        # direction).
-        cube_id = self.current_cube_id
-        marker = self.cube_tracker.cube_marker_in_map[cube_id]
-        if marker is None:
+        stop_dist = CUBE_APPROACH_DISTANCE if is_pick else PLACE_APPROACH_DISTANCE
+        result = self._cmd_vel_push(
+            ref[0], ref[1], stop_dist=stop_dist,
+            timeout=40.0, steer=True, tag=f"push ({self._push_mode})",
+        )
+        if result is not None:
+            if is_pick:
+                self._cube_approached = True
+                if result == "done":
+                    # Brief settle so the cube tracker has fresh close-range
+                    # detections before _precompute_grasp_poses runs.
+                    time.sleep(1.5)
+                self.state = 11
+            else:
+                self.state = 20
+
+    # ==================================================================
+    # State 28: back_out -- straight reverse, the mirror of State 27.
+    # Reverses away from the reference frame (self._push_mode) until
+    # base_link is at least SAFE_NAV_DISTANCE from it, clearing the
+    # surface's inflation_radius so Nav2 can plan the next leg. Used
+    #   pick  -> after grasp/tuck, then -> nav to PLACE (State 5).
+    #   place -> after drop/tuck, then -> next cube or done (State 26).
+    # ==================================================================
+    def state_28_back_out(self):
+        BACK_TIMEOUT = 60.0
+        next_state = 5 if self._push_mode != "place" else 26
+
+        ref = self._push_reference_xy()
+        if ref is None:
             self.node.get_logger().warn(
-                "drive_on_heading skipped: cube marker missing"
+                f"back_out ({self._push_mode}): reference marker missing, "
+                "proceeding anyway"
             )
-            self.nav.drive_done = True
-            self.nav.drive_succeeded = False
+            self.nav.stop()
+            self.state = next_state
             return
-        cube_x = marker.p.x()
-        cube_y = marker.p.y()
+
         try:
-            tf_map_base = self.tf_buffer.lookup_transform(
+            tf = self.tf_buffer.lookup_transform(
                 "map", "base_link",
                 rclpy.time.Time(),
                 timeout=Duration(seconds=0.5),
             )
         except Exception as e:
             self.node.get_logger().warn(
-                f"drive_on_heading skipped: TF lookup failed: {e}"
+                f"back_out ({self._push_mode}): TF lookup failed ({e}); stopping",
+                throttle_duration_sec=2.0,
             )
-            self.nav.drive_done = True
-            self.nav.drive_succeeded = False
+            self.nav.stop()
             return
-        rx = tf_map_base.transform.translation.x
-        ry = tf_map_base.transform.translation.y
-        current_dist = math.hypot(cube_x - rx, cube_y - ry)
-        push = current_dist - CUBE_APPROACH_DISTANCE
-        if push <= 0.02:
+
+        rx = tf.transform.translation.x
+        ry = tf.transform.translation.y
+        dist = math.hypot(ref[0] - rx, ref[1] - ry)
+
+        # Far enough from the surface -> stop and go to the next leg.
+        if dist >= (SAFE_NAV_DISTANCE+0.5):
+            self.nav.stop()
             self.node.get_logger().info(
-                f"Already at target distance ({current_dist:.2f} m), "
-                "skipping drive_on_heading"
+                f"back_out ({self._push_mode}) done: {dist:.2f} m from ref "
+                f"(target {SAFE_NAV_DISTANCE:.2f} m), clear of inflation"
             )
-            self.nav.drive_done = True
-            self.nav.drive_succeeded = True
+            # Clean nav latches before handing back to a Nav2 leg.
+            self.nav.goal_active = False
+            self.nav.goal_done = False
+            self.nav.goal_succeeded = False
+            self.nav.timeout_fired = False
+            self.state = next_state
             return
+
+        if (time.time() - self._send_time) > BACK_TIMEOUT:
+            self.nav.stop()
+            self.node.get_logger().warn(
+                f"back_out ({self._push_mode}) timed out at {dist:.2f} m; "
+                "proceeding anyway"
+            )
+            self.state = next_state
+            return
+
+        # Still inside the zone -> keep reversing (negative speed).
+        self.nav.publish_forward(-DRIVE_SPEED)
         self.node.get_logger().info(
-            f"drive_on_heading: current dist {current_dist:.2f} m, "
-            f"target {CUBE_APPROACH_DISTANCE:.2f} m, pushing {push:.2f} m"
+            f"back_out ({self._push_mode}): {dist:.2f} m -> target "
+            f"{SAFE_NAV_DISTANCE:.2f} m",
+            throttle_duration_sec=1.0,
         )
-        self.nav.send_drive_on_heading(push, speed=DRIVE_SPEED)
-        self._send_time = time.time()
 
     def _send_cube_approach_nav(self, marker_in_map):
         # Builds a Nav2 goal that puts base_link CUBE_APPROACH_DISTANCE
@@ -820,9 +715,14 @@ class Task3StateMachine:
         # Approach pose: CUBE_APPROACH_DISTANCE m back from the cube
         # along the wall normal, with yaw = wall_yaw so the robot ends
         # up frontal to the wall (cube ~in front of robot).
-        ax = cube_x - CUBE_APPROACH_DISTANCE * math.cos(wall_yaw)
-        ay = cube_y - CUBE_APPROACH_DISTANCE * math.sin(wall_yaw)
+        # ax = cube_x - CUBE_APPROACH_DISTANCE * math.cos(wall_yaw)
+        # ay = cube_y - CUBE_APPROACH_DISTANCE * math.sin(wall_yaw)
+        # yaw = wall_yaw
+
         yaw = wall_yaw
+        ax = cube_x - SAFE_NAV_DISTANCE * math.cos(yaw)
+        ay = cube_y - SAFE_NAV_DISTANCE * math.sin(yaw)
+
 
         # Diagnostic: current robot->cube distance (just for the log,
         # not used in the math).
@@ -854,7 +754,7 @@ class Task3StateMachine:
     # ==================================================================
     # Task 3 DROP sub-flow (states 20-26)
     # ==================================================================
-    def _tick_state_20_arm_pre_drop(self, arm_timeout):
+    def state_20_arm_pre_drop(self, arm_timeout):
         if not self._arm_goal_sent_for_state(20):
             try:
                 self._precompute_drop_poses()
@@ -883,7 +783,7 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_21_arm_drop(self, arm_timeout):
+    def state_21_arm_drop(self, arm_timeout):
         if not self._arm_goal_sent_for_state(21):
             self.node.get_logger().info(
                 "State 21: arm to DROP (just above surface)"
@@ -904,7 +804,7 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_22_open_gripper_release(self, gripper_timeout):
+    def state_22_open_gripper_release(self, gripper_timeout):
         self.node.get_logger().info("State 22: opening gripper to release cube")
         self.gripper.open()
         # Visible delay so the gripper opening renders before detach.
@@ -912,7 +812,7 @@ class Task3StateMachine:
         self.state = 23
         self._send_time = time.time()
 
-    def _tick_state_23_detach(self, attach_timeout):
+    def state_23_detach(self, attach_timeout):
         if not self._arm_goal_sent_for_state(23):
             self.link_attacher.detach(self.current_cube_id)
             self._mark_arm_goal_sent(23)
@@ -932,7 +832,7 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_24_arm_lift_after_drop(self, arm_timeout):
+    def state_24_arm_lift_after_drop(self, arm_timeout):
         if not self._arm_goal_sent_for_state(24):
             self.node.get_logger().info(
                 "State 24: lifting arm clear of dropped cube"
@@ -953,7 +853,7 @@ class Task3StateMachine:
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_25_arm_carry_back(self, arm_timeout):
+    def state_25_arm_carry_back(self, arm_timeout):
         if not self._arm_goal_sent_for_state(25):
             self.node.get_logger().info(
                 "State 25: tucking arm to HOME for nav back"
@@ -964,14 +864,20 @@ class Task3StateMachine:
             return
         if self.arm.motion_done:
             self._clear_arm_goal_sent()
-            self.state = 26
+            # The place push (State 27, "place" mode) parked us close to the
+            # place wall, inside its inflation_radius. back_out (State 28,
+            # "place" mode) reverses to SAFE_NAV_DISTANCE so the next-cube
+            # Nav2 leg can plan, then -> State 26 (next cube or done).
+            self._push_mode = "place"
+            self._send_time = time.time()
+            self.state = 28
             return
         if (time.time() - self._send_time) > arm_timeout:
             self.node.get_logger().warn("Arm tuck-back timed out, retrying")
             self._clear_arm_goal_sent()
             return
 
-    def _tick_state_26_next_or_done(self):
+    def state_26_next_or_done(self):
         finished_cube_id = self.current_cube_id
         self.node.get_logger().info(
             f"State 26: cube ID {finished_cube_id} placed"
@@ -1004,6 +910,85 @@ class Task3StateMachine:
     # ==================================================================
     # Helpers
     # ==================================================================
+    def _cmd_vel_push(self, target_x, target_y, stop_dist, timeout,
+                      steer, tag):
+        # Shared closed-loop /cmd_vel push engine used by BOTH the pick
+        # approach (State 27, steer=True toward the cube marker) and the
+        # place approach (State 29, steer=False toward a fixed point ahead).
+        # Reads the map->base_link TF each tick, drives forward at
+        # DRIVE_SPEED until base_link is within `stop_dist` of
+        # (target_x, target_y), optionally steering to null the heading
+        # error. Returns "done", "timeout", or None (still pushing) so the
+        # caller decides the next state.
+        YAW_GAIN = 1.5
+        YAW_MAX = 0.5
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                "map", "base_link",
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.5),
+            )
+        except Exception as e:
+            self.node.get_logger().warn(
+                f"{tag}: TF lookup failed ({e}); stopping",
+                throttle_duration_sec=2.0,
+            )
+            self.nav.stop()
+            return None
+
+        rx = tf.transform.translation.x
+        ry = tf.transform.translation.y
+        dist = math.hypot(target_x - rx, target_y - ry)
+
+        if dist <= stop_dist:
+            self.nav.stop()
+            self.node.get_logger().info(
+                f"{tag} done: {dist:.2f} m from target "
+                f"(stop {stop_dist:.2f} m)"
+            )
+            return "done"
+
+        if (time.time() - self._send_time) > timeout:
+            self.nav.stop()
+            self.node.get_logger().warn(
+                f"{tag} timed out at {dist:.2f} m"
+            )
+            return "timeout"
+
+        angular = 0.0
+        if steer:
+            qz = tf.transform.rotation.z
+            qw = tf.transform.rotation.w
+            robot_yaw = math.atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
+            bearing = math.atan2(target_y - ry, target_x - rx)
+            yaw_err = math.atan2(math.sin(bearing - robot_yaw),
+                                 math.cos(bearing - robot_yaw))
+            angular = max(-YAW_MAX, min(YAW_MAX, YAW_GAIN * yaw_err))
+
+        self.nav.publish_forward(DRIVE_SPEED, angular=angular)
+        self.node.get_logger().info(
+            f"{tag}: {dist:.2f} m -> stop {stop_dist:.2f} m",
+            throttle_duration_sec=1.0,
+        )
+        return None
+
+    def _push_reference_xy(self):
+        # Returns the (x, y) map-frame reference point that State 27 / 28
+        # measure distance against, selected by self._push_mode:
+        #   "pick"  -> the cube marker (cube_tracker.cube_marker_in_map)
+        #   "place" -> the place wall marker (aruco.place_marker_in_map)
+        # Returns None if the relevant marker isn't available.
+        if self._push_mode == "place":
+            marker = self.aruco.place_marker_in_map
+            if marker is None:
+                return None
+            return marker.p.x(), marker.p.y()
+        marker = self.cube_tracker.cube_marker_in_map[self.current_cube_id]
+        if marker is None:
+            return None
+        return marker.p.x(), marker.p.y()
+
+
     def _precompute_grasp_poses(self, marker_in_map):
         # Cube center in map: marker sits on +Z face of cube, so cube
         # center is CUBE_TOP_TO_CENTER below the marker frame origin.
@@ -1011,9 +996,7 @@ class Task3StateMachine:
         cube_y = marker_in_map.p.y()
         cube_center_z = marker_in_map.p.z() - CUBE_TOP_TO_CENTER
 
-        # Robot position in map (the cube marker on top has Z=up so it
-        # gives no useful yaw; we derive yaw from the robot heading so
-        # fingers open perpendicular to the approach direction).
+        # Robot position in map -- kept only for the diagnostic log below.
         tf_map_base = self.tf_buffer.lookup_transform(
             "map", "base_link",
             rclpy.time.Time(),
@@ -1023,22 +1006,34 @@ class Task3StateMachine:
         robot_y = tf_map_base.transform.translation.y
         yaw_to_cube = math.atan2(cube_y - robot_y, cube_x - robot_x)
 
-        # Top-down grasp matching Lab 3 "modify approach_frame to grasp
-        # from the top of the marker" hint. The cube marker frame has
-        # Z=up; DoRotY(pi/2) on it gives X=down (approach axis), which
-        # in absolute map coords is RPY(0, pi/2, yaw):
-        #   X_gripper → (0, 0, -1)              — pointing straight down
-        #   Y_gripper → (-sin(yaw), cos(yaw), 0) — horizontal, perp. to approach
-        #   Z_gripper → (cos(yaw), sin(yaw), 0) — horizontal, aligned with approach
-        # gripper_grasping_frame Z = gripper_link Y = finger opening axis,
-        # so fingers open along the approach line (one on the near face
-        # of the cube, one on the far face). Both fingers stay at the
-        # SAME height = cube center, well above the surface.
-        yaw_to_cube_rotated = yaw_to_cube + (math.pi / 2.0)
-        grasp_orient_in_map = Rotation.RPY(0.0, math.pi / 2.0, yaw_to_cube_rotated)
+        # Finger-alignment yaw comes from the CUBE's own orientation, not
+        # the robot->cube heading. The marker sits flat on the cube's top
+        # face with Z=up, so its rotation about map Z gives how the cube's
+        # vertical faces are oriented. Aligning the gripper to that makes
+        # the fingers come straight down ALONGSIDE two opposite faces;
+        # using the robot->cube heading instead left the fingers diagonal
+        # to the faces, so their tips hit the cube edges and shoved it.
+        marker_yaw = marker_in_map.M.GetRPY()[2]
 
-        # Grasp: gripper_grasping_frame at the cube center.
-        grasp_z = cube_center_z + CUBE_TOP_TO_CENTER + 0.005
+        # Top-down grasp (Lab 3 "grasp from the top of the marker" hint).
+        # RPY(0, pi/2, yaw) makes the gripper approach axis point straight
+        # DOWN (verified against the URDF); the finger OPENING axis is the
+        # grasping_frame Y, which this yaw rotates within the horizontal
+        # plane. We set yaw = marker_yaw so the opening axis is parallel to
+        # a pair of cube faces -- the cube body drops cleanly into the gap
+        # between the fingers as the arm descends along Z. CUBE_GRASP_YAW_OFFSET
+        # (default 0) lets us add a 90 deg tweak from constants if the
+        # fingers turn out to straddle the wrong pair of faces.
+        grasp_orient_in_map = Rotation.RPY(
+            0.0, math.pi / 2.0, marker_yaw + CUBE_GRASP_YAW_OFFSET
+        )
+
+        # Grasp: gripper_grasping_frame held GRASP_Z_ABOVE_TOP above the
+        # cube's top face. Aiming at/near the cube top (the old +0.005)
+        # drove the long fingertips through the cube base into the table;
+        # the offset keeps the fingertips around the cube's upper body.
+        cube_top_z = cube_center_z + CUBE_TOP_TO_CENTER
+        grasp_z = cube_top_z + GRASP_Z_ABOVE_TOP
         grasp_frame_in_map = Frame(
             grasp_orient_in_map, Vector(cube_x, cube_y, grasp_z)
         )
@@ -1060,9 +1055,12 @@ class Task3StateMachine:
         self._pre_grasp_pose_pos, self._pre_grasp_pose_quat = (
             self._frame_to_pos_quat(pre_grasp_in_base)
         )
+        m_r, m_p, m_y = marker_in_map.M.GetRPY()
         self.node.get_logger().info(
             f"[diag] cube_center=({cube_x:.2f}, {cube_y:.2f}, "
-            f"{cube_center_z:.2f}) yaw={yaw_to_cube:.2f}; "
+            f"{cube_center_z:.2f}) yaw_to_cube={yaw_to_cube:.2f}; "
+            f"marker_rpy=({m_r:.2f}, {m_p:.2f}, {m_y:.2f}) "
+            f"grasp_yaw={(m_y + CUBE_GRASP_YAW_OFFSET):.2f}; "
             f"pre_grasp_base=({self._pre_grasp_pose_pos[0]:.2f}, "
             f"{self._pre_grasp_pose_pos[1]:.2f}, "
             f"{self._pre_grasp_pose_pos[2]:.2f})"
@@ -1070,29 +1068,33 @@ class Task3StateMachine:
 
     def _precompute_drop_poses(self):
         # We don't use a cube marker for the drop -- the cube IS in the
-        # gripper. The target is "in front of the PLACE approach pose, on
-        # top of the place surface", which we infer from the latched
-        # PLACE approach PoseStamped (set by ArucoTracker on wall marker
-        # ID 238) plus the geometry constants.
-        approach = self.aruco.place_approach_pose
-        ax = approach.pose.position.x
-        ay = approach.pose.position.y
-        # Approach yaw points TOWARD the marker (we set it that way in
-        # task2_aruco._compute_horizontal_approach).
-        qx = approach.pose.orientation.x
-        qy = approach.pose.orientation.y
-        qz = approach.pose.orientation.z
-        qw = approach.pose.orientation.w
-        # 2D yaw from quaternion.
-        yaw = math.atan2(2.0 * (qw * qz + qx * qy),
-                         1.0 - 2.0 * (qy * qy + qz * qz))
+        # gripper. The target is "PLACE_FORWARD_OFFSET in front of the robot,
+        # on the place surface". We compute it from the robot's CURRENT base
+        # pose, NOT the latched place_approach_pose: the place push (State 27,
+        # "place" mode) drives the base ~0.4 m closer to the wall AFTER the
+        # approach pose was latched, so a drop measured from the stale
+        # approach pose ended up only ~0.24 m in front of the base -- too
+        # close for the arm to reach (OMPL "Unable to sample valid states").
+        # Measuring from the current base keeps the drop a fixed, reachable
+        # distance in front of the robot regardless of how far it pushed.
+        tf_map_base = self.tf_buffer.lookup_transform(
+            "map", "base_link",
+            rclpy.time.Time(),
+            timeout=Duration(seconds=0.5),
+        )
+        rx = tf_map_base.transform.translation.x
+        ry = tf_map_base.transform.translation.y
+        bqz = tf_map_base.transform.rotation.z
+        bqw = tf_map_base.transform.rotation.w
+        yaw = math.atan2(2.0 * bqw * bqz, 1.0 - 2.0 * bqz * bqz)
 
-        # Drop XY = forward of approach pose along its yaw.
-        drop_x = ax + PLACE_FORWARD_OFFSET * math.cos(yaw)
-        drop_y = ay + PLACE_FORWARD_OFFSET * math.sin(yaw)
+        # Drop XY = PLACE_FORWARD_OFFSET in front of the base along its yaw
+        # (the robot faces the place wall after the steered place push).
+        drop_x = rx + PLACE_FORWARD_OFFSET * math.cos(yaw)
+        drop_y = ry + PLACE_FORWARD_OFFSET * math.sin(yaw)
 
-        # Same top-down orientation as for grasping. yaw is the robot's
-        # heading at the PLACE approach pose (already toward the wall).
+        # Same top-down orientation as for grasping; yaw = robot heading
+        # (toward the wall).
         drop_orient_in_map = Rotation.RPY(0.0, math.pi / 2.0, yaw)
         drop_frame_in_map = Frame(
             drop_orient_in_map, Vector(drop_x, drop_y, PLACE_TARGET_Z)
@@ -1110,6 +1112,11 @@ class Task3StateMachine:
         )
         self._pre_drop_pose_pos, self._pre_drop_pose_quat = (
             self._frame_to_pos_quat(pre_drop_in_base)
+        )
+        self.node.get_logger().info(
+            f"[diag] drop_map=({drop_x:.2f}, {drop_y:.2f}, {PLACE_TARGET_Z:.2f}) "
+            f"drop_base=({self._drop_pose_pos[0]:.2f}, "
+            f"{self._drop_pose_pos[1]:.2f}, {self._drop_pose_pos[2]:.2f})"
         )
 
     def _transform_to_base_link(self, frame_in_map: Frame) -> Frame:
