@@ -107,19 +107,10 @@ GRASP_Z_ABOVE_TOP = 0.04   # meters above the cube top face
 
 # Pre-grasp = same XY as cube, lifted vertically by this much (arm hovers
 # above, then descends straight down to the grasp pose):
-PRE_GRASP_LIFT = 0.25   # meters above the cube CENTER (increased from 0.10)
-
-# Yaw tweak added to the cube marker's own yaw when orienting the gripper.
-# The finger opening axis (grasping_frame Y) is set parallel to a pair of
-# cube faces via the marker yaw. At offset 0 the fingers came down ALIGNED
-# WITH THE ROBOT'S X AXIS (the approach line), so one finger descended onto
-# the near face and rammed the cube. pi/2 rotates the opening axis 90 deg so
-# the two fingers straddle the LEFT/RIGHT faces and the cube drops into the
-# gap between them.
-CUBE_GRASP_YAW_OFFSET = 1.5707963267948966   # radians (pi/2)
+PRE_GRASP_LIFT = 0.40   # meters above the cube CENTER (increased from 0.10)
 
 # Post-grasp / carry: lift the cube up before navigating away.
-POST_GRASP_LIFT = 0.20  # meters above the cube CENTER
+POST_GRASP_LIFT = 0.30  # meters above the cube CENTER
 
 # Place-side geometry: the cube is dropped on the place surface. The place
 # surface top (env_exam_place_surface) is at z ~ 0.30 m.
@@ -145,7 +136,7 @@ PLACE_TARGET_Z = (
 # extended arm hit the wall in front of the place surface. The place marker
 # is poorly localized from afar so the drop is imprecise regardless; the
 # priority here is not to swing the arm into the wall.
-PLACE_FORWARD_OFFSET = 0.45    # meters
+PLACE_FORWARD_OFFSET = 0.65   # meters
 
 # Like the pick side, Nav2 parks short of the place wall because of
 # inflation, leaving the robot too far to set the cube on the surface.
@@ -156,6 +147,14 @@ PLACE_FORWARD_OFFSET = 0.45    # meters
 # Lowered 0.65 -> 0.30 to push the base much closer to the (poorly
 # localized, far-viewed) place marker so the drop lands nearer the table.
 PLACE_APPROACH_DISTANCE = 0.40  # meters between base_link and place wall marker
+
+# Lateral offset (along the wall) applied +/- around the table centre to
+# separate the two dropped cubes left/right. The place top is 0.5 m wide
+# (half-width 0.25, cube half 0.035), so the safe maximum centre offset is
+# ~0.21 m. At +/-CUBE_SIDE (0.07) the two cubes ended up only 0.14 m apart
+# centre-to-centre and looked stacked once drop noise is added; 0.15 m puts
+# the centres 0.30 m apart (~0.23 m gap) -- clearly left and right.
+PLACE_LATERAL_OFFSET = 0.15  # meters
 
 ##############################
 # Head tilt
@@ -197,7 +196,7 @@ HEAD_SCAN_DWELL = 3.0                          # seconds per pan position
 # comfortably inside Tiago's ~0.92 m max horizontal reach. The earlier
 # table strike at 0.65 was caused by the SKEWED approach (cube off to the
 # side -> arm reaching sideways), which the State 27 steering term fixes.
-CUBE_APPROACH_DISTANCE = 0.70   # meters between base_link and cube center XY
+CUBE_APPROACH_DISTANCE = 0.75  # meters between base_link and cube center XY
 DRIVE_SPEED = 0.15          # m/s for the /nav_vel forward push (0.05 was far
                             # too timid: the smoother/mux ramps it down, so the
                             # base crawled ~0.016 m/s and never closed the gap)

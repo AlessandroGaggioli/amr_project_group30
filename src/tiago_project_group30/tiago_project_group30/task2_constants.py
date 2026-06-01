@@ -49,7 +49,7 @@ SOFT_MAX_RANGE = 3.0   # meters
 # *per iteration* and we get tens of thousands of errors per plan attempt.
 # Must be >= the global_costmap inflation_radius (now 0.7 m in tiago_nav2.yaml)
 # so the planner never reaches out-of-bounds pixels.
-EDGE_MARGIN = 0.8  # meters
+EDGE_MARGIN = 1.0  # meters
 
 ##############################
 # ArUco / approach parameters
@@ -79,7 +79,7 @@ APPROACH_DISTANCE = 0.80  # meters
 # the cube. 3.0 m is the sweet spot: enough accuracy for the closer
 # approach without forcing the robot to crawl right up to every wall
 # during the random search.
-MAX_DETECTION_DISTANCE = 3.5  # meters
+MAX_DETECTION_DISTANCE = 4.0  # meters
 
 ##############################
 # Per-waypoint head sweep (replaces the old Nav2 /spin 2*pi)

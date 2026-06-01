@@ -77,12 +77,23 @@ class ArmController:
         head_msg.points.append(point)
         self.head_pub.publish(head_msg)
 
-    def move_to_pose(self, position, quat_xyzw):
-        # Cartesian goal for the end-effector (gripper_grasping_frame),
-        # planned by MoveIt2. Same call shape as lab3/3_move_arm.py.
+    def move_to_pose(self, position, quat_xyzw, cartesian=False):
+        # Pose goal for the end-effector (gripper_grasping_frame).
+        # cartesian=False -> joint-space RRTConnect (free-space gross motion,
+        #   the end-effector follows a curved path).
+        # cartesian=True  -> compute_cartesian_path: the end-effector travels
+        #   in a STRAIGHT LINE to the target. Required for the grasp descent
+        #   so the gripper drops straight down onto the cube instead of
+        #   swinging in sideways and clipping it.
         self.motion_started = False
         self.motion_done = False
-        self.arm.move_to_pose(position=position, quat_xyzw=quat_xyzw)
+        self.arm.move_to_pose(
+            position=position,
+            quat_xyzw=quat_xyzw,
+            cartesian=cartesian,
+            cartesian_max_step=0.01,
+            cartesian_fraction_threshold=0.0,
+        )
 
     def update_flags(self):
         # The `not self.motion_done` guard makes the "finished" log fire

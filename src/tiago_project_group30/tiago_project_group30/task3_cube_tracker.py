@@ -48,6 +48,8 @@ class CubeTracker:
         # task2_aruco): keep the observation taken from closest range
         # because aruco PnP error grows with distance.
         self.cube_marker_in_map = {cid: None for cid in CUBE_PICK_SEQUENCE}
+        # Latest marker pose in CAMERA frame (used for base-relative grasp).
+        self.cube_marker_in_camera = {cid: None for cid in CUBE_PICK_SEQUENCE}
         self.cube_detection_distance = {
             cid: float("inf") for cid in CUBE_PICK_SEQUENCE
         }
@@ -179,6 +181,7 @@ class CubeTracker:
         frame_map_cam = transform_to_kdl_frame(tf_map_cam)
         marker_in_map = frame_map_cam * aruco_in_cam
         self.cube_marker_in_map[cube_id] = marker_in_map
+        self.cube_marker_in_camera[cube_id] = aruco_in_cam
         self.cube_detection_distance[cube_id] = new_distance
 
     # ------------------------------------------------------------------
@@ -186,5 +189,6 @@ class CubeTracker:
         # Called after we've placed a cube, so the next attempt does not
         # reuse a stale pose (the cube has been physically moved).
         self.cube_marker_in_map[cube_id] = None
+        self.cube_marker_in_camera[cube_id] = None
         self.cube_detection_distance[cube_id] = float("inf")
         self.cube_seen_in_camera[cube_id] = False

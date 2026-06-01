@@ -24,17 +24,20 @@ from rclpy.duration import Duration
 from PyKDL import Frame, Rotation, Vector
 
 from tiago_project_group30.task2_kdl_helpers import transform_to_kdl_frame
+from tiago_project_group30.task2_constants import CAMERA_FRAME
 from tiago_project_group30.task3_constants import (
     CUBE_APPROACH_DISTANCE,
-    CUBE_GRASP_YAW_OFFSET,
     SAFE_NAV_DISTANCE,
     CUBE_PICK_SEQUENCE,
     CUBE_TOP_TO_CENTER,
     DRIVE_SPEED,
     GRASP_Z_ABOVE_TOP,
+    HEAD_SCAN_DWELL,
+    HEAD_SCAN_PANS,
     HEAD_TILT_DOWN_FOR_CUBE,
     PLACE_APPROACH_DISTANCE,
     PLACE_FORWARD_OFFSET,
+    PLACE_LATERAL_OFFSET,
     PLACE_TARGET_Z,
     POST_GRASP_LIFT,
     PRE_GRASP_LIFT,
@@ -172,6 +175,8 @@ class Task3StateMachine(CommonStates):
                     self.state_27_cmd_vel_push()
                 elif self.state == 28:
                     self.state_28_back_out()
+                elif self.state == 29:
+                    self.state_29_refresh_place_marker(CUBE_DETECTION_TIMEOUT)
 
             except Exception as e:
                 import traceback
@@ -238,13 +243,13 @@ class Task3StateMachine(CommonStates):
             nav.goal_done = False
             if nav.goal_succeeded:
                 self.node.get_logger().info(
-                    "PLACE approach reached, pushing closer to the surface"
+                    "PLACE approach reached, re-detecting marker up close"
                 )
-                # Reuse the shared push (State 27) in "place" mode: drive
-                # toward the place wall marker, then -> drop (State 20).
-                self._push_mode = "place"
+                # State 29 refreshes the (far-frozen) place marker with a
+                # close-range detection, then hands off to the push (State 27,
+                # "place" mode) and the drop (State 20).
                 self._send_time = time.time()
-                self.state = 27
+                self.state = 29
                 return True
             else:
                 self.node.get_logger().warn(
@@ -300,6 +305,9 @@ class Task3StateMachine(CommonStates):
         )
         self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, 0.0)
         self._send_time = time.time()
+        self._head_scan_active = False
+        self._head_scan_idx = 0
+        self._head_scan_time = None
         self.state = 11
 
     def state_11_wait_cube_visible(self, detection_timeout):
@@ -341,14 +349,36 @@ class Task3StateMachine(CommonStates):
                 return
             self.state = 12
             return
-        # No marker yet -- keep waiting at the current head pose. We do
-        # NOT re-tilt or pan: the head is already centered+tilted from
-        # State 10, and any motion would just invalidate the next batch
-        # of synced TF detections. Just throttle the log.
-        self.node.get_logger().info(
-            f"Waiting for cube ID {cube_id} to enter FOV...",
-            throttle_duration_sec=2.0,
-        )
+        # No marker yet: start a head scan only when the cube is not in
+        # the FOV. This keeps the head still for a brief window so any
+        # immediate detection isn't invalidated by motion.
+        scan_after = min(2.0, float(detection_timeout))
+        if not self._head_scan_active:
+            if (time.time() - self._send_time) < scan_after:
+                self.node.get_logger().info(
+                    f"Waiting for cube ID {cube_id} to enter FOV...",
+                    throttle_duration_sec=2.0,
+                )
+                return
+            self._head_scan_active = True
+            self._head_scan_idx = 0
+            self._head_scan_time = time.time()
+            pan = HEAD_SCAN_PANS[self._head_scan_idx]
+            self.node.get_logger().info(
+                f"Cube not visible, starting head scan pan={pan:.2f} rad"
+            )
+            self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, pan)
+            return
+
+        if (time.time() - self._head_scan_time) >= HEAD_SCAN_DWELL:
+            self._head_scan_idx = (self._head_scan_idx + 1) % len(HEAD_SCAN_PANS)
+            pan = HEAD_SCAN_PANS[self._head_scan_idx]
+            self.node.get_logger().info(
+                f"Head scan pan={pan:.2f} rad",
+                throttle_duration_sec=1.0,
+            )
+            self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, pan)
+            self._head_scan_time = time.time()
 
     def state_12_open_gripper_pre_grasp(self, gripper_timeout):
         self.node.get_logger().info("State 12: opening gripper before approach")
@@ -385,11 +415,16 @@ class Task3StateMachine(CommonStates):
     def state_14_arm_grasp(self, arm_timeout):
         if not self._arm_goal_sent_for_state(14):
             self.node.get_logger().info(
-                "State 14: arm to GRASP (cube center)"
+                "State 14: arm to GRASP (straight-line cartesian descent)"
             )
+            # Cartesian (straight-line) descent from the pre-grasp hover to
+            # the grasp pose: the gripper drops STRAIGHT DOWN onto the cube.
+            # A joint-space plan here curves the end-effector sideways and
+            # the open fingers clip the cube on the way down.
             self.arm.move_to_pose(
                 position=self._grasp_pose_pos,
                 quat_xyzw=self._grasp_pose_quat,
+                cartesian=True,
             )
             self._mark_arm_goal_sent(14)
             self._send_time = time.time()
@@ -459,11 +494,17 @@ class Task3StateMachine(CommonStates):
     def state_17_arm_lift_after_grasp(self, arm_timeout):
         if not self._arm_goal_sent_for_state(17):
             self.node.get_logger().info(
-                "State 17: lifting arm (back to pre-grasp height)"
+                "State 17: lifting arm (straight-line cartesian lift)"
             )
+            # Cartesian (straight-line) lift, the inverse of the State 14
+            # descent: the gripper rises STRAIGHT UP from the grasp pose to
+            # the pre-grasp hover. A joint-space plan would swing the just-
+            # grasped cube sideways and could drag it against the cube next
+            # to it or the table edge.
             self.arm.move_to_pose(
                 position=self._pre_grasp_pose_pos,
                 quat_xyzw=self._pre_grasp_pose_quat,
+                cartesian=True,
             )
             self._mark_arm_goal_sent(17)
             self._send_time = time.time()
@@ -586,6 +627,38 @@ class Task3StateMachine(CommonStates):
     #   place -> toward the place wall marker, stop within
     #            PLACE_APPROACH_DISTANCE, then drop (State 20).
     # ==================================================================
+    # def state_27_cmd_vel_push(self):
+    #     is_pick = self._push_mode != "place"
+    #     ref = self._push_reference_xy()
+    #     if ref is None:
+    #         self.node.get_logger().warn(
+    #             f"push ({self._push_mode}): reference marker missing, "
+    #             "proceeding anyway"
+    #         )
+    #         self.nav.stop()
+    #         if is_pick:
+    #             self._cube_approached = True
+    #             self.state = 11
+    #         else:
+    #             self.state = 20
+    #         return
+
+    #     stop_dist = CUBE_APPROACH_DISTANCE if is_pick else PLACE_APPROACH_DISTANCE
+    #     result = self._cmd_vel_push(
+    #         ref[0], ref[1], stop_dist=stop_dist,
+    #         timeout=40.0, steer=True, tag=f"push ({self._push_mode})",
+    #     )
+    #     if result is not None:
+    #         if is_pick:
+    #             self._cube_approached = True
+    #             if result == "done":
+    #                 # Brief settle so the cube tracker has fresh close-range
+    #                 # detections before _precompute_grasp_poses runs.
+    #                 time.sleep(1.5)
+    #             self.state = 11
+    #         else:
+    #             self.state = 20
+
     def state_27_cmd_vel_push(self):
         is_pick = self._push_mode != "place"
         ref = self._push_reference_xy()
@@ -607,13 +680,25 @@ class Task3StateMachine(CommonStates):
             ref[0], ref[1], stop_dist=stop_dist,
             timeout=40.0, steer=True, tag=f"push ({self._push_mode})",
         )
+        
         if result is not None:
             if is_pick:
                 self._cube_approached = True
-                if result == "done":
-                    # Brief settle so the cube tracker has fresh close-range
-                    # detections before _precompute_grasp_poses runs.
+                if result == "done" or result == "timeout":
+
+                    # Pieghiamo la testa leggermente più giù per centrare il marker 
+                    # da vicino e avere una lettura ottica perfetta.
+                    self.arm.tilt_head(-1.15, 0.0)
+                    # Pausa per fermare l'inerzia del robot
                     time.sleep(1.5)
+                    
+                    # --- FIX CRUCIALE ---
+                    # 1. Cancelliamo i dati registrati durante il movimento!
+                    self.cube_tracker.reset_cube(self.current_cube_id)
+                    self.cube_tracker.unfreeze()
+
+                    # --------------------
+                    
                 self.state = 11
             else:
                 self.state = 20
@@ -689,6 +774,65 @@ class Task3StateMachine(CommonStates):
             f"{SAFE_NAV_DISTANCE:.2f} m",
             throttle_duration_sec=1.0,
         )
+
+    def state_29_refresh_place_marker(self, timeout):
+        # The place marker was localized from far away during the search and
+        # then frozen, so the push and the drop both targeted a wrong point
+        # (cube missed the table / wasn't centred). Now that we're parked in
+        # front of the surface, tilt the head down to the (low) marker and let
+        # a FRESH close-range detection overwrite place_marker_in_map before
+        # the push, exactly like the camera anti-drift used for the cube.
+        if not self._arm_goal_sent_for_state(29):
+            self.node.get_logger().info(
+                "State 29: re-detecting place marker up close before drop"
+            )
+            # Un-freeze + reset KEEP-CLOSEST so the close detection wins over
+            # the stale far-away one.
+            self.aruco.place_detection_distance = float("inf")
+            self.aruco._refresh_approach_poses = True
+            # Start a head scan (tilt down + pan sweep) to bring the low place
+            # marker into the FOV, same as the pick cube search (State 11):
+            # the robot rarely parks dead-centre on the surface, so a fixed
+            # pan=0 can miss the marker.
+            self._head_scan_idx = 0
+            self._head_scan_time = time.time()
+            self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, HEAD_SCAN_PANS[0])
+            self._mark_arm_goal_sent(29)
+            self._send_time = time.time()
+            return
+
+        # A close detection has landed once the stored distance is small
+        # (we're ~1 m from the marker here).
+        refreshed = self.aruco.place_detection_distance < 1.5
+        timed_out = (time.time() - self._send_time) > timeout
+        if refreshed or timed_out:
+            if refreshed:
+                self.node.get_logger().info(
+                    f"Place marker refreshed at "
+                    f"{self.aruco.place_detection_distance:.2f} m; pushing"
+                )
+            else:
+                self.node.get_logger().warn(
+                    "Place marker not re-detected up close; "
+                    "proceeding with frozen value"
+                )
+            self.aruco._refresh_approach_poses = False  # re-freeze
+            self._push_mode = "place"
+            self._clear_arm_goal_sent()
+            self._send_time = time.time()
+            self.state = 27
+            return
+
+        # Not refreshed yet -> keep sweeping the head across the pan positions.
+        if (time.time() - self._head_scan_time) >= HEAD_SCAN_DWELL:
+            self._head_scan_idx = (self._head_scan_idx + 1) % len(HEAD_SCAN_PANS)
+            pan = HEAD_SCAN_PANS[self._head_scan_idx]
+            self.node.get_logger().info(
+                f"Place marker scan pan={pan:.2f} rad",
+                throttle_duration_sec=1.0,
+            )
+            self.arm.tilt_head(HEAD_TILT_DOWN_FOR_CUBE, pan)
+            self._head_scan_time = time.time()
 
     def _send_cube_approach_nav(self, marker_in_map):
         # Builds a Nav2 goal that puts base_link CUBE_APPROACH_DISTANCE
@@ -789,11 +933,18 @@ class Task3StateMachine(CommonStates):
     def state_21_arm_drop(self, arm_timeout):
         if not self._arm_goal_sent_for_state(21):
             self.node.get_logger().info(
-                "State 21: arm to DROP (just above surface)"
+                "State 21: arm to DROP (straight-line cartesian descent)"
             )
+            # Cartesian (straight-line) descent from pre-drop to drop, same as
+            # the grasp descent. Pre-drop and drop share the orientation, so a
+            # joint-space plan was free to spin the wrist (arm_7) a full 2*pi
+            # and back -- the "360 deg wrist rotation before release". A
+            # cartesian path holds the orientation fixed and just lowers the
+            # gripper straight down.
             self.arm.move_to_pose(
                 position=self._drop_pose_pos,
                 quat_xyzw=self._drop_pose_quat,
+                cartesian=True,
             )
             self._mark_arm_goal_sent(21)
             self._send_time = time.time()
@@ -1005,78 +1156,85 @@ class Task3StateMachine(CommonStates):
 
 
     def _precompute_grasp_poses(self, marker_in_map):
-        # Cube center in map: marker sits on +Z face of cube, so cube
-        # center is CUBE_TOP_TO_CENTER below the marker frame origin.
-        cube_x = marker_in_map.p.x()
-        cube_y = marker_in_map.p.y()
-        cube_center_z = marker_in_map.p.z() - CUBE_TOP_TO_CENTER
+        # Lab 3 style: build approach frame directly in base_link using the
+        # marker seen by the camera (anti-drift), falling back to map frame.
+        # DoRotY(+pi/2) makes X_gripper point straight down for top-down grasp.
 
-        # Robot position in map -- kept only for the diagnostic log below.
-        tf_map_base = self.tf_buffer.lookup_transform(
-            "map", "base_link",
-            rclpy.time.Time(),
-            timeout=Duration(seconds=0.5),
+        # --- primary: camera-frame marker transformed to base_link ----------
+        marker_in_base = None
+        marker_in_cam = self.cube_tracker.cube_marker_in_camera.get(
+            self.current_cube_id
         )
-        robot_x = tf_map_base.transform.translation.x
-        robot_y = tf_map_base.transform.translation.y
-        yaw_to_cube = math.atan2(cube_y - robot_y, cube_x - robot_x)
+        if marker_in_cam is not None:
+            try:
+                tf_base_cam = self.tf_buffer.lookup_transform(
+                    "base_link", CAMERA_FRAME,
+                    rclpy.time.Time(),
+                    timeout=Duration(seconds=0.2),
+                )
+                marker_in_base = transform_to_kdl_frame(tf_base_cam) * marker_in_cam
+                frame_label = "camera"
+            except Exception:
+                marker_in_base = None
 
-        # Finger-alignment yaw comes from the CUBE's own orientation, not
-        # the robot->cube heading. The marker sits flat on the cube's top
-        # face with Z=up, so its rotation about map Z gives how the cube's
-        # vertical faces are oriented. Aligning the gripper to that makes
-        # the fingers come straight down ALONGSIDE two opposite faces;
-        # using the robot->cube heading instead left the fingers diagonal
-        # to the faces, so their tips hit the cube edges and shoved it.
-        marker_yaw = marker_in_map.M.GetRPY()[2]
+        # --- fallback: map marker transformed to base_link ------------------
+        if marker_in_base is None:
+            try:
+                tf_base_map = self.tf_buffer.lookup_transform(
+                    "base_link", "map",
+                    rclpy.time.Time(),
+                    timeout=Duration(seconds=0.5),
+                )
+                marker_in_base = transform_to_kdl_frame(tf_base_map) * marker_in_map
+                frame_label = "map_fallback"
+            except Exception as e:
+                self.node.get_logger().error(f"TF base_link<-map fallita: {e}")
+                return
 
-        # Top-down grasp (Lab 3 "grasp from the top of the marker" hint).
-        # RPY(0, pi/2, yaw) makes the gripper approach axis point straight
-        # DOWN (verified against the URDF); the finger OPENING axis is the
-        # grasping_frame Y, which this yaw rotates within the horizontal
-        # plane. We set yaw = marker_yaw so the opening axis is parallel to
-        # a pair of cube faces -- the cube body drops cleanly into the gap
-        # between the fingers as the arm descends along Z. CUBE_GRASP_YAW_OFFSET
-        # (default 0) lets us add a 90 deg tweak from constants if the
-        # fingers turn out to straddle the wrong pair of faces.
-        grasp_orient_in_map = Rotation.RPY(
-            0.0, math.pi / 2.0, marker_yaw + CUBE_GRASP_YAW_OFFSET
+        # --- position -------------------------------------------------------
+        cube_x = marker_in_base.p.x()
+        cube_y = marker_in_base.p.y()
+        # marker frame sits on TOP face; cube center is half-side below
+        cube_center_z = marker_in_base.p.z() - CUBE_TOP_TO_CENTER
+        cube_top_z = marker_in_base.p.z()          # = cube_center_z + CUBE_TOP_TO_CENTER
+
+        # --- orientation (Lab 3 approach_frame modifier) --------------------
+        # The ArUco PnP roll/pitch is noisy; using the full marker rotation
+        # would tilt the approach axis and the gripper would NOT descend
+        # vertically. Keep ONLY the marker yaw about base_link Z (this aligns
+        # the fingers with the cube faces), then build the orientation from
+        # Identity so the descent axis is guaranteed perfectly vertical:
+        #   Identity -> DoRotZ(yaw): pure rotation about vertical, X/Y stay
+        #               horizontal, fingers parallel to the cube faces.
+        #   DoRotY(+pi/2): X_gripper now points along -Z_base (straight down).
+        mqx, mqy, mqz, mqw = marker_in_base.M.GetQuaternion()
+        cube_yaw = math.atan2(
+            2.0 * (mqw * mqz + mqx * mqy),
+            1.0 - 2.0 * (mqy * mqy + mqz * mqz),
         )
+        grasp_orient = Rotation.Identity()
+        grasp_orient.DoRotZ(cube_yaw)
+        grasp_orient.DoRotY(math.pi / 2.0)
 
-        # Grasp: gripper_grasping_frame held GRASP_Z_ABOVE_TOP above the
-        # cube's top face. Aiming at/near the cube top (the old +0.005)
-        # drove the long fingertips through the cube base into the table;
-        # the offset keeps the fingertips around the cube's upper body.
-        cube_top_z = cube_center_z + CUBE_TOP_TO_CENTER
-        grasp_z = cube_top_z + GRASP_Z_ABOVE_TOP
-        grasp_frame_in_map = Frame(
-            grasp_orient_in_map, Vector(cube_x, cube_y, grasp_z)
+        grasp_in_base = Frame(
+            grasp_orient,
+            Vector(cube_x, cube_y, cube_top_z + GRASP_Z_ABOVE_TOP),
         )
-        # Pre-grasp: PRE_GRASP_LIFT meters straight ABOVE the cube
-        # (gripper hovers, then descends to the grasp pose).
-        pre_grasp_frame_in_map = Frame(
-            grasp_orient_in_map,
+        pre_grasp_in_base = Frame(
+            grasp_orient,
             Vector(cube_x, cube_y, cube_center_z + PRE_GRASP_LIFT),
         )
-
-        # MoveIt2 plans in base_link (configured in tiago_arm.py).
-        # Transform both poses from map -> base_link.
-        grasp_in_base = self._transform_to_base_link(grasp_frame_in_map)
-        pre_grasp_in_base = self._transform_to_base_link(pre_grasp_frame_in_map)
 
         self._grasp_pose_pos, self._grasp_pose_quat = self._frame_to_pos_quat(
             grasp_in_base
         )
-        self._pre_grasp_pose_pos, self._pre_grasp_pose_quat = (
-            self._frame_to_pos_quat(pre_grasp_in_base)
+        self._pre_grasp_pose_pos, self._pre_grasp_pose_quat = self._frame_to_pos_quat(
+            pre_grasp_in_base
         )
-        m_r, m_p, m_y = marker_in_map.M.GetRPY()
         self.node.get_logger().info(
-            f"[diag] cube_center=({cube_x:.2f}, {cube_y:.2f}, "
-            f"{cube_center_z:.2f}) yaw_to_cube={yaw_to_cube:.2f}; "
-            f"marker_rpy=({m_r:.2f}, {m_p:.2f}, {m_y:.2f}) "
-            f"grasp_yaw={(m_y + CUBE_GRASP_YAW_OFFSET):.2f}; "
-            f"pre_grasp_base=({self._pre_grasp_pose_pos[0]:.2f}, "
+            f"[grasp] SOURCE={frame_label} cube_yaw={cube_yaw:.2f} rad "
+            f"cube_base=({cube_x:.2f}, {cube_y:.2f}, {cube_center_z:.2f}) "
+            f"pre_grasp=({self._pre_grasp_pose_pos[0]:.2f}, "
             f"{self._pre_grasp_pose_pos[1]:.2f}, "
             f"{self._pre_grasp_pose_pos[2]:.2f})"
         )
@@ -1101,26 +1259,42 @@ class Task3StateMachine(CommonStates):
         ry = tf_map_base.transform.translation.y
         bqz = tf_map_base.transform.rotation.z
         bqw = tf_map_base.transform.rotation.w
-        yaw = math.atan2(2.0 * bqw * bqz, 1.0 - 2.0 * bqz * bqz)
+        robot_yaw_map = math.atan2(2.0 * bqw * bqz, 1.0 - 2.0 * bqz * bqz)
 
         # Drop XY = PLACE_FORWARD_OFFSET in front of the base along its yaw
         # (the robot faces the place wall after the steered place push).
-        drop_x = rx + PLACE_FORWARD_OFFSET * math.cos(yaw)
-        drop_y = ry + PLACE_FORWARD_OFFSET * math.sin(yaw)
+        drop_x = rx + PLACE_FORWARD_OFFSET * math.cos(robot_yaw_map)
+        drop_y = ry + PLACE_FORWARD_OFFSET * math.sin(robot_yaw_map) + (PLACE_LATERAL_OFFSET if self._current_cube_idx == 0 else -PLACE_LATERAL_OFFSET)
 
-        # Same top-down orientation as for grasping; yaw = robot heading
-        # (toward the wall).
-        drop_orient_in_map = Rotation.RPY(0.0, math.pi / 2.0, yaw)
-        drop_frame_in_map = Frame(
-            drop_orient_in_map, Vector(drop_x, drop_y, PLACE_TARGET_Z)
+        # Posizione in base_link: PLACE_FORWARD_OFFSET m avanti lungo X_base,
+        # offset laterale per separare i due cubi.
+        drop_x_base = PLACE_FORWARD_OFFSET
+        # Laterale ancorato al CENTRO TAVOLO (marker di place), non alla base:
+        # proietto l'offset del marker sull'asse Y_base del robot.
+        mk = self.aruco.place_marker_in_map
+        table_y_base = (-(mk.p.x() - rx) * math.sin(robot_yaw_map)
+                        + (mk.p.y() - ry) * math.cos(robot_yaw_map)) if mk else 0.0
+        drop_y_base = table_y_base + (PLACE_LATERAL_OFFSET if self._current_cube_idx == 0 else -PLACE_LATERAL_OFFSET)
+
+        # Altezza in base_link: convertiamo PLACE_TARGET_Z (quota mappa) in z_base.
+        tf_base_map = self.tf_buffer.lookup_transform(
+            "base_link", "map",
+            rclpy.time.Time(),
+            timeout=Duration(seconds=0.5),
         )
-        # Pre-drop: POST_GRASP_LIFT meters straight ABOVE the drop point.
-        pre_drop_frame_in_map = Frame(
-            drop_orient_in_map,
-            Vector(drop_x, drop_y, PLACE_TARGET_Z + POST_GRASP_LIFT),
+        frame_base_map = transform_to_kdl_frame(tf_base_map)
+        drop_in_map_for_z = frame_base_map * Frame(
+            Rotation.Identity(), Vector(drop_x, drop_y, PLACE_TARGET_Z)
         )
-        drop_in_base = self._transform_to_base_link(drop_frame_in_map)
-        pre_drop_in_base = self._transform_to_base_link(pre_drop_frame_in_map)
+        drop_z_base = drop_in_map_for_z.p.z()
+        pre_drop_z_base = drop_z_base + POST_GRASP_LIFT
+
+        # Orientamento: stesso pattern del grasp (DoRotY(-pi/2) = discesa verticale).
+        drop_in_base = Frame(Rotation.Identity(), Vector(drop_x_base, drop_y_base, drop_z_base))
+        drop_in_base.M.DoRotY(math.pi / 2.0)
+
+        pre_drop_in_base = Frame(Rotation.Identity(), Vector(drop_x_base, drop_y_base, pre_drop_z_base))
+        pre_drop_in_base.M.DoRotY(math.pi / 2.0)
 
         self._drop_pose_pos, self._drop_pose_quat = self._frame_to_pos_quat(
             drop_in_base

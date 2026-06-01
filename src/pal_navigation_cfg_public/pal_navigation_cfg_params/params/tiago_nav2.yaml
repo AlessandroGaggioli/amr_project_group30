@@ -194,11 +194,11 @@ controller_server:
       debug_trajectory_details: True
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 0.50
+      max_vel_x: 0.5
       max_vel_y: 0.0
       max_vel_theta: 0.80
       min_speed_xy: 0.0
-      max_speed_xy: 0.50
+      max_speed_xy: 0.5
       min_speed_theta: 0.0
       acc_lim_x: 2.5
       acc_lim_y: 0.0
@@ -326,14 +326,12 @@ local_costmap:
         footprint_clearing_enabled: true
         publish_voxel_map: True
         # Voxel volume must include the depth camera origin (~z=1.07 m,
-        # head height). With z_resolution=0.05 we need z_voxels >= 22 to
-        # reach 1.10 m; 40 gives 2.00 m which covers the full robot.
-        # The previous value (16 -> ceiling 0.80 m) caused every point
-        # cloud frame to be silently dropped with:
-        #   "Sensor origin at (..., 1.07) is out of map bounds ..."
+        # head height). The voxel grid implementation supports up to 16
+        # z values, so we increase z_resolution to keep the height while
+        # staying within that limit.
         origin_z: 0.0
-        z_resolution: 0.05
-        z_voxels: 40
+        z_resolution: 0.10
+        z_voxels: 16
         max_obstacle_height: 2.0
         min_obstacle_height: 0.05
         mark_threshold: 0

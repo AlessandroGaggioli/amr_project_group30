@@ -151,4 +151,9 @@ class CostmapSampler:
         probs = weights / wsum
 
         idx = int(np.random.choice(len(cand_xs), p=probs))
-        return (float(cand_xs[idx]), float(cand_ys[idx]))
+
+        x_goal = float(cand_xs[idx])
+        y_goal = float(cand_ys[idx])
+        yaw = math.atan2(y_goal - ry, x_goal - rx)
+
+        return (x_goal, y_goal,yaw)

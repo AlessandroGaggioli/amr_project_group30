@@ -21,7 +21,7 @@ class CommonStates:
     # ------------------------------------------------------------------
     def state_0_arm_tuck(self):
         self.node.get_logger().info("State 0: tuck arm to HOME (MoveIt)")
-        self.arm.move_to_home(tilt_head=True)
+        self.arm.move_to_home(tilt_head=False)
         self._send_time = time.time()
         self.state = 1
 
@@ -237,16 +237,81 @@ class CommonStates:
                 self.sampler.visited_waypoints = []
                 time.sleep(0.5)
                 return True
-            x, y = xy
+            x, y , yaw = xy
             self.sampler.visited_waypoints.append((x, y))
             self.node.get_logger().info(
-                f"New random waypoint ({x:.2f}, {y:.2f}); "
+                f"New random waypoint ({x:.2f}, {y:.2f}), {yaw:.2f};"
                 f"visited={len(self.sampler.visited_waypoints)}"
             )
-            nav.send_goal(x, y, 0.0)
+            nav.send_goal(x, y, yaw)
             self.search_phase = "nav"
             self._send_time = time.time()
         return False
+    
+    # # ------------------------------------------------------------------
+    # # State 3: MANUAL search via RViz + autonomous head pan sweep
+    # # ------------------------------------------------------------------
+    # def state_3_random_search(self, search_nav_timeout):
+    #     # Il parametro search_nav_timeout viene mantenuto nella firma 
+    #     # per non dover modificare la chiamata nel ciclo run(), ma viene ignorato.
+    #     aruco = self.aruco
+    #     arm = self.arm
+
+    #     # 1. CONDIZIONE DI USCITA: Entrambi i marker sono stati agganciati.
+    #     if (
+    #         aruco.pick_approach_pose is not None
+    #         and aruco.place_approach_pose is not None
+    #     ):
+    #         self.node.get_logger().info(
+    #             "Entrambi i marker visti! Prendo il controllo e interrompo la navigazione RViz."
+    #         )
+            
+    #         # Ricentra la testa in modo che gli stati successivi partano puliti
+    #         arm.tilt_head(-0.5, 0.0)
+            
+    #         # Congela le pose per impedire al rumore di spostare l'approccio
+    #         aruco.freeze()
+    #         self.node.get_logger().info(
+    #             f"Freezing PICK approach at "
+    #             f"({aruco.pick_approach_pose.pose.position.x:.2f}, "
+    #             f"{aruco.pick_approach_pose.pose.position.y:.2f}) and "
+    #             f"PLACE approach at "
+    #             f"({aruco.place_approach_pose.pose.position.x:.2f}, "
+    #             f"{aruco.place_approach_pose.pose.position.y:.2f})"
+    #         )
+    #         # Passando allo State 4, il nodo invierà un NUOVO Nav2Goal, 
+    #         # che annullerà automaticamente e immediatamente l'eventuale 
+    #         # obiettivo RViz in esecuzione.
+    #         self.state = 4
+    #         return True
+
+    #     # 2. INIZIALIZZAZIONE DELLA RICERCA MANUALE
+    #     # Eseguito solo la prima volta che entriamo nello State 3
+    #     if getattr(self, "_manual_search_init", None) is None:
+    #         self.node.get_logger().info("==================================================")
+    #         self.node.get_logger().info("RICERCA MANUALE ATTIVA: Usa 'Nav2 Goal' su RViz!")
+    #         self.node.get_logger().info("==================================================")
+    #         self._manual_search_init = True
+    #         self._pan_idx = 0
+    #         self._send_time = time.time()
+    #         arm.tilt_head(-0.5, SEARCH_PAN_POSITIONS[self._pan_idx])
+
+    #     # 3. PANNING CONTINUO DELLA TESTA
+    #     # Continua a muovere la telecamera a destra e sinistra per cercare i marker
+    #     # mentre TU guidi fisicamente il robot dal computer tramite RViz.
+    #     if (time.time() - self._send_time) >= SEARCH_PAN_DWELL:
+    #         self._pan_idx = (self._pan_idx + 1) % len(SEARCH_PAN_POSITIONS)
+    #         pan = SEARCH_PAN_POSITIONS[self._pan_idx]
+    #         arm.tilt_head(-0.5, pan)
+    #         self._send_time = time.time()
+            
+    #         # Stampa un log a schermo ogni 5 secondi per ricordarti cosa sta facendo
+    #         self.node.get_logger().info(
+    #             "In attesa dei marker... Mandami in giro usando Nav2Goal su RViz.",
+    #             throttle_duration_sec=5.0
+    #         )
+
+    #     return False
 
     # ------------------------------------------------------------------
     # State 4: navigate to PICK approach
