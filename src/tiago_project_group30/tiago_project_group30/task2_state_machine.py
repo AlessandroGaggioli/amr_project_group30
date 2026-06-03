@@ -18,7 +18,13 @@ import time
 from threading import Event
 
 import rclpy
-from tiago_project_group30.common_states import CommonStates
+from tiago_project_group30.common_states import CommonStates, Phase
+from tiago_project_group30.constants import (
+    PLANNING_TIMEOUT,
+    EXECUTION_TIMEOUT,
+    SEARCH_NAV_TIMEOUT,
+    APPROACH_NAV_TIMEOUT,
+)
 
 
 class StateMachine(CommonStates):
@@ -49,12 +55,6 @@ class StateMachine(CommonStates):
         self.node.get_logger().info("Executor ready, giving the stack 10s to come up")
         time.sleep(10.0)
 
-        # timeouts
-        PLANNING_TIMEOUT = 6.0 # Time allowed for MoveIt to plan an arm path
-        EXECUTION_TIMEOUT = 30.0  # Time allowed for the physical arm movement
-        SEARCH_NAV_TIMEOUT = 120.0 # Time allowed to reach a random exploration point
-        APPROACH_NAV_TIMEOUT = 180.0 # Time allowed to reach the pick/place approach pose.
-
         # Main state machine loop
         while rclpy.ok() and not self.finished:
             try:
@@ -64,22 +64,24 @@ class StateMachine(CommonStates):
                 self.amcl.update_spin_flags()
                 self.amcl.update_amcl_flags()
 
-                if self.state == 0:
+                phase = self.state
+
+                if phase == Phase.ARM_HOME :
                     self.state_0_arm_tuck()
-                elif self.state == 1:
+                elif phase == Phase.WAIT_ARM:
                     self.state_1_wait_arm(PLANNING_TIMEOUT, EXECUTION_TIMEOUT)
-                elif self.state == 2:
+                elif phase == Phase.AMCL:
                     self.state_2_amcl_localization()
-                elif self.state == 3:
+                elif phase == Phase.SEARCH:
                     if self.state_3_random_search(SEARCH_NAV_TIMEOUT):
                         continue
-                elif self.state == 4:
+                elif phase == Phase.NAV_PICK:
                     if self.state_4_pick(APPROACH_NAV_TIMEOUT):
                         continue
-                elif self.state == 5:
+                elif phase == Phase.NAV_PLACE:
                     if self.state_5_place(APPROACH_NAV_TIMEOUT):
                         continue
-                elif self.state == 6:
+                elif phase == Phase.DONE:
                     self.state_6_done()
                     break
 

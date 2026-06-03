@@ -1,5 +1,17 @@
 # Autonomous Mobile Robotics Exam - Group 30
 #
+
+# timeouts for arm movement
+EXECUTION_TIMEOUT = 30.0  # max time to finish once EXECUTING
+PLANNING_TIMEOUT = 6.0 # Time allowed for MoveIt to plan an arm path
+EXECUTION_TIMEOUT = 30.0  # Time allowed for the physical arm movement
+SEARCH_NAV_TIMEOUT = 120.0 # Time allowed to reach a random exploration point
+APPROACH_NAV_TIMEOUT = 180.0 # Time allowed to reach the pick/place approach pose.
+ARM_MOTION_TIMEOUT = 20.0   # MoveIt2 plan+execute per arm goal
+GRIPPER_TIMEOUT = 5.0
+ATTACH_TIMEOUT = 3.0
+CUBE_DETECTION_TIMEOUT = 15.0   # max wait for cube marker after head tilt
+
 # ------------------
 # Tiago parameters
 # ------------------
@@ -91,7 +103,7 @@ CUBE_TOP_TO_CENTER = CUBE_SIDE / 2.0  # 0.035 m
 
 CUBE_APPROACH_DISTANCE = 0.75  
 DRIVE_SPEED = 0.15          
-SAFE_NAV_DISTANCE = 1.1   
+SAFE_NAV_DISTANCE = 1.6   
 
 # -------
 # Tiago 

@@ -11,7 +11,11 @@ from threading import Event
 
 import rclpy
 
-from tiago_project_group30.common_states import CommonStates
+from tiago_project_group30.common_states import CommonStates, Phase
+from tiago_project_group30.constants import (
+    PLANNING_TIMEOUT,
+    EXECUTION_TIMEOUT,
+)
 
 
 class Task1StateMachine(CommonStates):
@@ -33,22 +37,20 @@ class Task1StateMachine(CommonStates):
         # Allow the ROS2 stack 10 seconds to fully start. 
         time.sleep(10.0)
 
-        # timeouts for arm movement
-        PLANNING_TIMEOUT = 5.0    # max time to start EXECUTING after the goal
-        EXECUTION_TIMEOUT = 30.0  # max time to finish once EXECUTING
-
         # Main state machine loop
         while rclpy.ok() and not self.finished:
             try:
                 self.arm.update_flags() # update the current status flags. 
 
-                if self.state == 0:#send the command to homing the arm. 
+                phase = self.state
+
+                if phase == Phase.ARM_HOME :#send the command to homing the arm. 
                     self.state_0_arm_tuck() 
 
-                elif self.state == 1: # wait for the completion of the movement.
+                elif phase == Phase.WAIT_ARM: # wait for the completion of the movement.
                     self.state_1_wait_arm(PLANNING_TIMEOUT, EXECUTION_TIMEOUT) 
 
-                elif self.state == 2: # Arm is tucked. 
+                elif phase == Phase.AMCL: # Arm is tucked. 
                     self.node.get_logger().info(
                         "State 2: arm at HOME, Task 1 done -- "
                         "explore_lite start"

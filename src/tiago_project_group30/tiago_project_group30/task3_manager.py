@@ -1,11 +1,16 @@
-#!/usr/bin/env python3
-# TASK 3 of Autonomous Mobile Robotics Exam - Group 30
-#
-# Entrypoint for Task 3: wires together the Task 2 components (arm, nav,
-# AMCL, wall-marker aruco tracker, costmap sampler) PLUS the three new
-# Task 3 components (gripper, link attacher, cube marker tracker) into a
-# single rclpy.node.Node, and runs the Task3StateMachine on its own
-# thread (same Lab 4 non-blocking pattern used in task2_manager.py).
+# Autonomous Mobile Robotics Exam - Group 30
+
+# Task 3 - main manager node.
+
+# Brings together all individual robot control modules
+# (navigation , arm, localization, aruco tracking, costmap sampling, pick and place) 
+# and the main state machine.
+
+# New components for Task 3:
+    # - GripperController (tiago_gripper.py)
+    # - LinkAttacher (task3_link_attacher.py)
+    # - CubeTracker (task3_cube_tracker.py)
+
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -32,18 +37,27 @@ class Task3Manager(Node):
     def __init__(self):
         super().__init__("task3_manager")
 
-        # ---------- callback groups ----------
+        # ---------- 
+        # callbacks
+        # ----------
         cb_group_arm = ReentrantCallbackGroup()
         cb_group_nav = ReentrantCallbackGroup()
         cb_group_io = ReentrantCallbackGroup()
         cb_group_gripper = ReentrantCallbackGroup()
 
-        # ---------- TF ----------
+        # ---------- 
+        # TF system
+        # ----------
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        # ---------- Task 2 components (re-used as-is) ----------
+        # ---------
+        # Components 
+        # ATTENTION: 
+            # Order matters.
+            #AMCL localizer must be created before ArucoTracker. 
+        # ----------
         self.arm = ArmController(self, cb_group_arm)
         self.nav = NavClient(self, cb_group_nav)
         self.amcl = AmclLocalizer(self, cb_group_nav, cb_group_io)
@@ -51,15 +65,15 @@ class Task3Manager(Node):
             self, self.tf_buffer, self.tf_broadcaster, self.amcl, cb_group_io
         )
         self.sampler = CostmapSampler(self, self.tf_buffer, cb_group_io)
-
-        # ---------- Task 3 components ----------
         self.gripper = GripperController(self, cb_group_gripper)
         self.link_attacher = LinkAttacher(self, cb_group_io)
         self.cube_tracker = CubeTracker(
             self, self.tf_buffer, self.amcl, cb_group_io
         )
 
-        # ---------- state machine ----------
+        # ---------- 
+        # State Machine
+        # ----------
         self.state_machine = Task3StateMachine(
             self,
             self.arm, self.nav, self.amcl, self.aruco, self.sampler,
@@ -71,10 +85,7 @@ class Task3Manager(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = Task3Manager()
-    # 5 threads (vs. 4 for Task 2): Task 3 adds the gripper callback group
-    # plus AttachLink/DetachLink service futures, all of which need to
-    # spin concurrently with the arm and nav action feedback.
-    run_task(node, node.state_machine, num_threads=5)
+    run_task(node, node.state_machine, num_threads=5) 
 
 
 if __name__ == "__main__":

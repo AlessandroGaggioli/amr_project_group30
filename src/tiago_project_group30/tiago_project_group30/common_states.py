@@ -4,12 +4,32 @@
 
 import math
 import time
+from enum import IntEnum
 
 from tiago_project_group30.constants import (
     SEARCH_PAN_DWELL,
     SEARCH_PAN_POSITIONS,
 )
 from tiago_project_group30.state_helpers import StateRunners
+
+class Phase(IntEnum):
+    # Shared states 
+    ARM_HOME = 0
+    WAIT_ARM = 1
+    AMCL = 2
+    SEARCH = 3
+    NAV_PICK = 4
+    NAV_PLACE = 5
+    DONE = 6
+    # Task 3 only states 
+    HEAD_TILT = 10
+    WAIT_CUBE = 11
+    WAIT_CUBE_NAV = 12
+    RUN_SEQUENCE = 13     # executes the grasp OR the drop step list
+    PUSH = 14             # closed-loop cmd_vel push (pick or place)
+    BACK_OUT = 15         # straight reverse (pick or place)
+    REFRESH_PLACE = 16
+    NEXT_OR_DONE = 17
 
 
 class CommonStates(StateRunners):

@@ -1,4 +1,6 @@
-# TASK 2 of Autonomous Mobile Robotics Exam - Group 30
+# Autonomous Mobile Robotics Exam - Group 30
+
+# Task 2 launch file
 #
 # Launches:
 #   - Gazebo simulation of the group30 world (with MoveIt)

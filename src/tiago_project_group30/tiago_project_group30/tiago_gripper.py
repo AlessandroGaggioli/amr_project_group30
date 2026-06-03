@@ -1,14 +1,7 @@
-# TASK 3 of Autonomous Mobile Robotics Exam - Group 30
+# Autonomous Mobile Robotics Exam - Group 30
 #
-# Thin wrapper around pymoveit2.GripperInterface, modeled on Lab 2's
-# basic_gripper.py. Exposes a polling API (open() / close() + flags) in
-# the same style as ArmController so the StateMachine can use it without
-# blocking the executor thread.
-#
-# The exam spec requires the gripper open / close to be CLEARLY visible
-# in simulation. The state machine therefore waits an extra short pause
-# after each open/close call so the motion is unambiguously rendered in
-# Gazebo before the next state runs (e.g. before the link attach fires).
+# Task 3 - Gripper controller module.
+
 
 from pymoveit2 import GripperInterface
 
@@ -25,6 +18,8 @@ class GripperController:
 
     def __init__(self, node, callback_group):
         self.node = node
+
+        # Init the connection to robot's gripper using MoveIt2. 
         self.gripper = GripperInterface(
             node=node,
             gripper_joint_names=GRIPPER_JOINT_NAMES,
@@ -34,7 +29,8 @@ class GripperController:
             callback_group=callback_group,
             gripper_command_action_name=GRIPPER_COMMAND_ACTION_NAME,
         )
-        # One-shot latches the state machine polls.
+
+        # Status flags
         self.action_started = False
         self.action_done = False
 
@@ -51,16 +47,15 @@ class GripperController:
         self.gripper.close()
 
     def update_flags(self):
-        # GripperInterface exposes wait_until_executed() (blocking) but for
-        # the non-blocking state machine we poll a public flag the
-        # interface keeps internally. pymoveit2's GripperInterface inherits
-        # from MoveIt2Gripper which sets the same EXECUTING/IDLE state as
-        # MoveIt2, queried via query_state().
+        # Check the state of the gripper action. 
         from pymoveit2 import MoveIt2State
+
         state = self.gripper.query_state()
+
         if not self.action_started and state == MoveIt2State.EXECUTING:
             self.action_started = True
             self.node.get_logger().info("Gripper motion started")
+            
         if (
             self.action_started
             and not self.action_done
