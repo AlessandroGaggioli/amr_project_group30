@@ -1,19 +1,9 @@
-# TASK 3 of Autonomous Mobile Robotics Exam - Group 30
+# Autonomous Mobile Robotics Exam - Group 30
 #
-# Cube ArUco tracker. Same pattern as task2_aruco.ArucoTracker but tuned
-# for the markers SITTING ON TOP of the two pick cubes (IDs 63 and 582).
-# Differences vs. the wall-marker tracker:
+# Task 3 - Cube aruco Tracker 
 #
-#   - Detects only one marker AT A TIME (the cube currently being
-#     handled). We keep last-known map-frame poses for both markers
-#     anyway, in case the camera sees ID 582 while we're already in
-#     Task 3 for ID 63.
-#   - Does NOT compute / broadcast an approach frame: the base is
-#     already at the (Task 2) PICK approach pose -- we use the cube
-#     marker only to derive the GRASP pose for the arm.
-#   - Composes the marker_in_camera into the map frame at the time of
-#     detection (msg.header.stamp), same trick task2_aruco uses to avoid
-#     stale-TF drift.
+# Tracks the aruco markers placed on top of the cubes. 
+
 
 import math
 
@@ -23,15 +13,13 @@ from rclpy.duration import Duration
 from geometry_msgs.msg import TransformStamped
 from PyKDL import Frame, Rotation, Vector
 
-from tiago_project_group30.task2_constants import (
+from tiago_project_group30.constants import (
     CAMERA_FRAME,
+    CUBE_ARUCO_TOPICS,
+    CUBE_PICK_SEQUENCE,
     MAX_DETECTION_DISTANCE,
 )
 from tiago_project_group30.task2_kdl_helpers import transform_to_kdl_frame
-from tiago_project_group30.task3_constants import (
-    CUBE_ARUCO_TOPICS,
-    CUBE_PICK_SEQUENCE,
-)
 
 
 class CubeTracker:
@@ -44,36 +32,30 @@ class CubeTracker:
         self.map_frame = map_frame
         self.camera_frame = CAMERA_FRAME
 
-        # Per-cube map-frame pose, closest-observation policy (same as
-        # task2_aruco): keep the observation taken from closest range
-        # because aruco PnP error grows with distance.
+        # Dictionary to store the calculated global map coordinates for each cube. 
         self.cube_marker_in_map = {cid: None for cid in CUBE_PICK_SEQUENCE}
-        # Latest marker pose in CAMERA frame (used for base-relative grasp).
+
+        # Dictionary to store the raw position of the cube relative to the camera lens. 
         self.cube_marker_in_camera = {cid: None for cid in CUBE_PICK_SEQUENCE}
+
+        # Tracks how far the camera was from the cube to enforce the keep closest policy. 
         self.cube_detection_distance = {
             cid: float("inf") for cid in CUBE_PICK_SEQUENCE
         }
+
+        # Flags to remember if the camera has ever seen each cube. 
         self.cube_seen_in_camera = {cid: False for cid in CUBE_PICK_SEQUENCE}
 
-        # Master gate: during Task 2 (random search) the camera may
-        # briefly glimpse a cube marker from far away at an oblique
-        # angle, producing a noisy PnP that would then be reused as
-        # the "best detection" in State 11 -- before the head tilt
-        # has even completed. We therefore IGNORE every detection
-        # until the state machine explicitly enables us at State 10.
+        # The camera might see a cube from across the room while driving.
+        # keep this false to ignore all data unitl the robot is in front of the table.
         self.enabled = False
 
-        # Once the robot is at close grasp range we FREEZE the stored pose
-        # (same idea as task2_aruco.freeze): a single ArUco PnP has a few-cm
-        # lateral jitter, so a late noisy detection arriving just before the
-        # arm grasps could shift the target sideways along the finger-opening
-        # axis and make a finger clip the cube. After freeze() we stop
-        # updating cube_marker_in_map and grasp against the latched pose.
+        # Once the robot is in front of the table
+        # Lock the coordinates of the cube. Prevents noisy camera frame from shifting the target during the grasp.
         self.frozen = False
 
-        # Per-cube subscription. We give each callback the cube_id by
-        # closing over it in a small lambda so a single _on_detection
-        # handles both feeds.
+        # Subscribe to the aruco TF topics. 
+        # The callback will process the detections and update the cube_marker_in_map.
         for cube_id, topic in CUBE_ARUCO_TOPICS.items():
             node.create_subscription(
                 TransformStamped,
@@ -90,33 +72,29 @@ class CubeTracker:
 
     # ------------------------------------------------------------------
     def enable(self):
-        # Called by the state machine once Task 2 is done and the robot
-        # is parked at the PICK approach pose. From this moment on,
-        # detections are accepted and merged into cube_marker_in_map.
+        # Turns on the tracker. 
         self.enabled = True
 
     def freeze(self):
-        # Latch the current pose: stop accepting new detections so the
-        # grasp uses a stable target (called once at close range).
+        # Locks the cube's coordinates before grasping. 
         self.frozen = True
 
     def unfreeze(self):
-        # Re-open the tracker (called when moving on to the next cube).
+        # Unlock the tracker so it can look to the next cube. 
         self.frozen = False
 
     def _on_detection(self, msg: TransformStamped, cube_id: int):
-        # Master gate (see __init__): drop everything that arrives while
-        # the state machine is still running Task 2.
+        # Ignore data if the tracker is turned off 
         if not self.enabled:
             return
-        # Pose latched for the grasp: ignore late noisy detections.
+        # Ignore data if the target is already frozen. 
         if self.frozen:
             return
-        # Same convergence gating used for wall markers: composing into
-        # map before AMCL is locked produces garbage.
+        # Ignore data if AMCL is not converged. 
         if not self.amcl.converged:
             return
 
+        # Convert raw camera message into KDL Frame. 
         aruco_in_cam = Frame(
             Rotation.Quaternion(
                 msg.transform.rotation.x, msg.transform.rotation.y,
@@ -132,34 +110,30 @@ class CubeTracker:
         if not self.cube_seen_in_camera[cube_id]:
             self.cube_seen_in_camera[cube_id] = True
             self.node.get_logger().info(
-                f"[diag] cube marker ID {cube_id} IS being detected by camera"
+                f"[diag] cube marker ID {cube_id} is being detected by camera"
             )
 
-        # Distance gate: aruco PnP accuracy degrades fast with range.
+        # Calculate the direct distance between the camera and the cube.
         new_distance = math.sqrt(
             aruco_in_cam.p.x() ** 2
             + aruco_in_cam.p.y() ** 2
             + aruco_in_cam.p.z() ** 2
         )
+        # Ignore cubes that are too far away
         if new_distance > MAX_DETECTION_DISTANCE:
             return
 
-        # Closest-observation policy.
+        # Closest-observation policy. Only update the cube's position if this new 
+        # picture was taken from closer up than our previous best picture.
         prev_distance = self.cube_detection_distance[cube_id]
         already_have = self.cube_marker_in_map[cube_id] is not None
         if already_have and new_distance >= prev_distance:
             return
 
-        # Compose into map. We PREFER the TF at the exact detection stamp
-        # (composing aruco_in_cam at time T with map<-cam at T-dt would
-        # inject the distance the robot moved during dt). But under heavy
-        # CPU load (Gazebo + MoveIt + Nav2) the stamped TF routinely lags
-        # past the 0.5 s timeout, and a strict same-stamp lookup then drops
-        # EVERY detection for tens of seconds (the "waiting for cube...
-        # then mysteriously sees it" stall). During cube detection the base
-        # is parked still at the approach pose, so a small TF time mismatch
-        # causes negligible drift -- if the stamped lookup fails we fall
-        # back to the latest available TF instead of dropping the frame.
+        # Calculate the exact map coordinates of the cube.
+        # First, try to get the robot's position at the exact timestamp the picture was taken.
+        # Ifif fails (due to CPU load probably) fallback to the latest known position.
+
         try:
             tf_map_cam = self.tf_buffer.lookup_transform(
                 self.map_frame,
@@ -176,8 +150,10 @@ class CubeTracker:
                     timeout=Duration(seconds=0.2),
                 )
             except Exception:
-                return
+                return # If both fail, drop the image and wait for the next one
 
+        # Multiply the robot's map position by the cube's camera position 
+        # to get the absolute map coordinates. 
         frame_map_cam = transform_to_kdl_frame(tf_map_cam)
         marker_in_map = frame_map_cam * aruco_in_cam
         self.cube_marker_in_map[cube_id] = marker_in_map
@@ -186,8 +162,8 @@ class CubeTracker:
 
     # ------------------------------------------------------------------
     def reset_cube(self, cube_id: int):
-        # Called after we've placed a cube, so the next attempt does not
-        # reuse a stale pose (the cube has been physically moved).
+        # Clears the memory for a specific cube. Called after a cube is picked 
+        # and moved, so the robot doesn't accidentally try to use its old coordinates later.
         self.cube_marker_in_map[cube_id] = None
         self.cube_marker_in_camera[cube_id] = None
         self.cube_detection_distance[cube_id] = float("inf")

@@ -20,25 +20,19 @@ from launch_ros.actions import Node
 
 #######################################################################
 # GROUP 30 - Task 2 random spawn
-# Required by the exam spec: "The alignement between the map and the
-# navigation system must be performed with the robot initialized in a
-# random position (different from the one used for map generation)."
 # Each launch picks one of a whitelist of known-free (x, y, yaw) poses in
-# the group30 world. The first entry is the original PAL default, kept
-# so behaviour is unchanged when random.choice happens to pick index 0.
+# the group30 world. The first  is the default
+# kept so behaviour is unchanged when random.choice happens to pick index 0.
 #######################################################################
 import random
 
 SPAWN_CANDIDATES = [
-    (0.0, -1.3, 0.0),     # original default
+    (0.0, -1.3, 0.0),     # default
     (-1.0, -3.0, 0.0),
     (-2.0, -1.0, -1.57),
     (4.75,-1.0,1.57),
     (4.75,-3.0,3.14),
 ]
-#######################################################################
-# END GROUP 30 random spawn
-#######################################################################
 
 
 def generate_launch_description():
@@ -57,10 +51,6 @@ def generate_launch_description():
     # Was: spawn_coordinates = [0.0, -1.3, 0.0]
     #######################################################################
     spawn_coordinates = list(random.choice(SPAWN_CANDIDATES))
-    #######################################################################
-    # END GROUP 30
-    #######################################################################
-
     model_name = DeclareLaunchArgument(
         'model_name', default_value='tiago',
         description='Gazebo model name'
@@ -81,9 +71,6 @@ def generate_launch_description():
                                    #######################################
                                    '-z', '0.0',
                                    '-Y', str(spawn_coordinates[2]),
-                                   #######################################
-                                   # END GROUP 30
-                                   #######################################
                                    # LaunchConfiguration('gzpose'),
                                    ],
                         output='screen')

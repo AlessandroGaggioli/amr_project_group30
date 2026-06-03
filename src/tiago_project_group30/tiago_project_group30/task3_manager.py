@@ -7,17 +7,15 @@
 # single rclpy.node.Node, and runs the Task3StateMachine on its own
 # thread (same Lab 4 non-blocking pattern used in task2_manager.py).
 
-from threading import Event, Thread
-
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from tf2_ros import TransformBroadcaster
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
+from tiago_project_group30.task_runner import run_task
 from tiago_project_group30.task2_amcl import AmclLocalizer
 from tiago_project_group30.tiago_arm import ArmController
 from tiago_project_group30.task2_aruco import ArucoTracker
@@ -73,29 +71,10 @@ class Task3Manager(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = Task3Manager()
-
-    executor_ready = Event()
-    state_thread = Thread(
-        target=node.state_machine.run, args=(executor_ready,), daemon=True
-    )
-    state_thread.start()
-
     # 5 threads (vs. 4 for Task 2): Task 3 adds the gripper callback group
     # plus AttachLink/DetachLink service futures, all of which need to
     # spin concurrently with the arm and nav action feedback.
-    executor = MultiThreadedExecutor(num_threads=5)
-    executor.add_node(node)
-    executor_ready.set()
-
-    try:
-        while rclpy.ok() and not node.state_machine.finished:
-            executor.spin_once(timeout_sec=0.1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        executor.shutdown()
-        node.destroy_node()
-        rclpy.shutdown()
+    run_task(node, node.state_machine, num_threads=5)
 
 
 if __name__ == "__main__":

@@ -37,33 +37,23 @@ amcl:
     z_rand: 0.5
     z_short: 0.05
     scan_topic: /scan_raw
-    #######################################################################
-    # GROUP 30 - Task 2 random spawn
-    #
-    # AMCL boots with a dummy initial_pose (0,0,0). This is NOT the robot's
-    # real pose (it spawns randomly in the world per task2 spec), but giving
-    # AMCL *some* initial pose is what lets it publish the map->odom TF
-    # immediately, which in turn keeps planner_server / rviz / costmap2d
-    # silent during the boot phase instead of flooding the console with
-    # "Timed out waiting for transform from base_footprint to map" and
-    # "AMCL cannot publish a pose ..." messages.
-    #
-    # The exam's alignment-from-random-position requirement is still
-    # honoured: task2_manager.py State 2 calls /reinitialize_global_localization
-    # which discards this dummy guess, redistributes the particles uniformly
-    # over the map, and the subsequent /spin makes them converge to the
-    # actual robot pose (verifiable via /amcl_pose). This is exactly the
-    # "kidnapped robot" recovery scenario described in the lectures.
-    #######################################################################
     set_initial_pose: true
     initial_pose:
       x: 0.0
       y: 0.0
       z: 0.0
       yaw: 0.0
-    #######################################################################
-    # END GROUP 30
-    #######################################################################
+
+    #Note:
+    # initial_pose is set to true (0,0,0), even if it's not the real initial pose of the robot
+    # Giving to AMCL an initial pose allows it to publish the map->odom TF immediately
+    # which in turn keeps planner_server / rviz / costmap2d silent during the boot phase 
+    # instead of flooding the console with "Timed out waiting for transform from base_footprint to map" 
+    # and "AMCL cannot publish a pose ..." messages.
+
+    # task2_manager.py State 2 calls /reinitialize_global_localization which discards this guess, 
+    # redistributes the particles uniformly over the map
+    # and the subsequent /spin makes them converge to the actual robot pose. 
 
 behavior_server:
   ros__parameters:
@@ -83,13 +73,6 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.1
     use_sim_time: true
-    # Spin/Backup/DriveOnHeading simulate the robot footprint forward by
-    # simulate_ahead_time seconds and abort if the simulated trajectory
-    # would intersect any inflated cell. With 2.0 s and max_rotational_vel
-    # 1.0 rad/s, the spin recovery was checking ~115 deg of rotation ahead
-    # -- too conservative in tight spots, so 10 of 14 spins failed
-    # immediately without ever executing. Halving to 1.0 s lets the
-    # recoveries actually run instead of self-aborting.
     simulate_ahead_time: 1.0
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
@@ -173,15 +156,6 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      # Tightened so DWB declares "Failed to make progress" more quickly
-      # when the robot is stuck. The previous values (0.3 m / 30 s) meant
-      # the controller could sit nearly motionless for half a minute
-      # without escalating; the FollowPath RecoveryNode's single retry
-      # then took up another window and our 60 s APPROACH_NAV_TIMEOUT hit
-      # before Nav2's outer ReactiveFallback (Spin / Wait / BackUp) was
-      # ever reached. With 0.2 m / 5 s the controller fails faster, the
-      # outer recovery actually fires, and the robot Spins to refresh the
-      # costmap when stuck.
       required_movement_radius: 0.2
       movement_time_allowance: 5.0
     general_goal_checker:
@@ -246,7 +220,7 @@ global_costmap:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
         footprint_clearing_enabled: true
-        observation_sources: scan #pointcloud
+        observation_sources: scan 
         scan:
           topic: /scan_raw
           max_obstacle_height: 2.0
@@ -258,28 +232,6 @@ global_costmap:
           raytrace_min_range: 0.35
           obstacle_max_range: 5.0
           obstacle_min_range: 0.35
-        # Head RGB-D cloud: lets the costmap see obstacles ABOVE laser
-        # height (e.g. the kitchen counter body that sits on thin legs and
-        # is therefore invisible to the 2D laser / saved map).
-        # min_obstacle_height=0.15 filters out the floor; the counter body
-        # is well above that.
-        # clearing=True is the standard nav2 behaviour: raytraced
-        # observations clear stale marks so the costmap doesn't fill up
-        # with ghost obstacles over time. The trade-off is that obstacles
-        # the camera isn't currently looking at fade out -- the right fix
-        # for that is to make the saved map include them (re-run Task 1
-        # SLAM with the kitchen counter properly captured).
-        # pointcloud:
-        #   topic: /head_front_camera/depth_registered/points
-        #   max_obstacle_height: 2.0
-        #   min_obstacle_height: 0.15
-        #   clearing: True
-        #   marking: True
-        #   data_type: "PointCloud2"
-        #   raytrace_max_range: 5.0
-        #   raytrace_min_range: 0.35
-        #   obstacle_max_range: 3.0
-        #   obstacle_min_range: 0.35
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -307,17 +259,6 @@ local_costmap:
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # Local-costmap-only tuning: steeper cost decay so DWB can find
-        # executable trajectories near obstacles. Inflation_radius is
-        # unchanged (cells still inflate the same distance), only the
-        # gradient is steeper -- cost drops to near-zero much sooner
-        # away from the obstacle. The GLOBAL costmap keeps the more
-        # conservative cost_scaling_factor=3.0, so the planned route is
-        # still safe; only local trajectory scoring loosens up.
-        # 8.0 (vs 5.0) makes the gradient even steeper so the robot can
-        # navigate through tight pockets near depth-marked obstacles
-        # (kitchen counter etc.) where it was getting stuck recovering
-        # repeatedly during long State 4/5 traverses.
         cost_scaling_factor: 10.0
         inflation_radius: 0.45
       voxel_layer:
@@ -325,10 +266,6 @@ local_costmap:
         enabled: True
         footprint_clearing_enabled: true
         publish_voxel_map: True
-        # Voxel volume must include the depth camera origin (~z=1.07 m,
-        # head height). The voxel grid implementation supports up to 16
-        # z values, so we increase z_resolution to keep the height while
-        # staying within that limit.
         origin_z: 0.0
         z_resolution: 0.10
         z_voxels: 16
@@ -346,7 +283,6 @@ local_costmap:
           raytrace_min_range: 0.1
           obstacle_max_range: 2.5
           obstacle_min_range: 0.1
-        # Head RGB-D cloud (see global_costmap comment).
         pointcloud:
           topic: /head_front_camera/depth_registered/points
           max_obstacle_height: 2.0

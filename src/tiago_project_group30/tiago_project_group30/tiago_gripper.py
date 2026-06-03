@@ -12,7 +12,7 @@
 
 from pymoveit2 import GripperInterface
 
-from tiago_project_group30.task3_constants import (
+from tiago_project_group30.constants import (
     GRIPPER_CLOSED_POSITIONS,
     GRIPPER_COMMAND_ACTION_NAME,
     GRIPPER_GROUP_NAME,

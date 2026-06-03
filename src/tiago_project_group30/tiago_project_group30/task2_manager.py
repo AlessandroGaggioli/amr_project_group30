@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
-# TASK 2 of Autonomous Mobile Robotics Exam - Group 30
+# Autonomous Mobile Robotics Exam - Group 30
 #
-# Entrypoint: wires the per-concern components into a single rclpy.node.Node
-# and runs the StateMachine on a separate thread (so MultiThreadedExecutor
-# keeps spinning subscriptions, service calls, and action futures while the
-# state machine polls them at ~20 Hz).
+# Task 2 - main manager node.
 #
-# Components (each in its own task2_*.py file):
-#   - ArmController   (tiago_arm.py)         MoveIt2 arm + head publisher
-#   - NavClient       (task2_nav.py)        Nav2 NavigateToPose, polled
-#   - AmclLocalizer   (task2_amcl.py)       AMCL + Spin + costmap clears
-#   - ArucoTracker    (task2_aruco.py)      ArUco subs + approach broadcaster
-#   - CostmapSampler  (task2_costmap.py)    global costmap + random sampler
+# Brings together all individual robot control modules 
+# (navigation , arm, localization, aruco tracking, costmap sampling) and the main state machine.
+
+# It runs the main StateMachine in a separate background thread. 
+#
+# Components: 
+#   - ArmController   (tiago_arm.py)         
+#   - NavClient       (task2_nav.py)       
+#   - AmclLocalizer   (task2_amcl.py)      
+#   - ArucoTracker    (task2_aruco.py)      
+#   - CostmapSampler  (task2_costmap.py)  
 #   - StateMachine    (task2_state_machine.py)
 #
-# Constants live in task2_constants.py; helpers in task2_kdl_helpers.py.
-
-from threading import Event, Thread
+# Constants in constants.py
+# Helpers in task2_kdl_helpers.py.
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from tf2_ros import TransformBroadcaster
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
+from tiago_project_group30.task_runner import run_task
 from tiago_project_group30.task2_amcl import AmclLocalizer
 from tiago_project_group30.tiago_arm import ArmController
 from tiago_project_group30.task2_aruco import ArucoTracker
@@ -40,19 +41,27 @@ class Task2Manager(Node):
     def __init__(self):
         super().__init__("task2_manager")
 
-        # ---------- callback groups ----------
+        # ---------- 
+        # callbacks
+        # ----------
         cb_group_arm = ReentrantCallbackGroup()
         cb_group_nav = ReentrantCallbackGroup()
         cb_group_io = ReentrantCallbackGroup()
 
-        # ---------- TF (shared by aruco tracker and costmap sampler) ----------
+        # ---------- 
+        # TF system 
+        # ----------
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        # ---------- components ----------
-        # Order matters: AmclLocalizer must exist before ArucoTracker
-        # (gated on amcl.converged).
+        # ---------
+        # Components 
+        # ATTENTION: 
+            # Order matters.
+            #AMCL localizer must be created before ArucoTracker. 
+        # ----------
+
         self.arm = ArmController(self, cb_group_arm)
         self.nav = NavClient(self, cb_group_nav)
         self.amcl = AmclLocalizer(self, cb_group_nav, cb_group_io)
@@ -61,7 +70,9 @@ class Task2Manager(Node):
         )
         self.sampler = CostmapSampler(self, self.tf_buffer, cb_group_io)
 
-        # ---------- state machine ----------
+        # ---------- 
+        # State Machine
+        # ----------
         self.state_machine = StateMachine(
             self, self.arm, self.nav, self.amcl, self.aruco, self.sampler
         )
@@ -70,26 +81,7 @@ class Task2Manager(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = Task2Manager()
-
-    executor_ready = Event()
-    state_thread = Thread(
-        target=node.state_machine.run, args=(executor_ready,), daemon=True
-    )
-    state_thread.start()
-
-    executor = MultiThreadedExecutor(num_threads=4)
-    executor.add_node(node)
-    executor_ready.set()
-
-    try:
-        while rclpy.ok() and not node.state_machine.finished:
-            executor.spin_once(timeout_sec=0.1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        executor.shutdown()
-        node.destroy_node()
-        rclpy.shutdown()
+    run_task(node, node.state_machine, num_threads=4)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from pymoveit2 import MoveIt2, MoveIt2State
 
-from tiago_project_group30.task2_constants import (
+from tiago_project_group30.constants import (
     HOME_JOINT_POSITIONS,
     JOINT_ARM_NAMES,
 )

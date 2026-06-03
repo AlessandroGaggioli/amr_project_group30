@@ -1,27 +1,19 @@
-# TASK 2 of Autonomous Mobile Robotics Exam - Group 30
+# Autonomous Mobile Robotics Exam - Group 30
 #
-# Non-blocking state machine (modeled on Lab 4's state_machine_not_blocking).
-# Fulfills the Task 2 specification:
-#   State 0: tuck arm to HOME via MoveIt (FIRST: spawn pose has the arm
-#            extended, which is dangerous near obstacles and blocks both
-#            the LiDAR/depth FOV and ArUco detection).
-#   State 1: wait for arm motion to finish.
-#   State 2: AMCL global localization. Substates:
-#              0  call /reinitialize_global_localization
-#              1  clear local costmap (removes stale marks that would
-#                 falsely trip "Collision Ahead" on Spin)
-#              2  send Nav2 /spin 2*pi
-#              3  wait for AMCL covariance to converge
-#   State 3: random search by sampling reachable cells from the global
-#            costmap, with visited memory and a per-waypoint HEAD PAN
-#            sweep for the in-place look-around (replaces the old Nav2
-#            /spin 2*pi, which kept aborting on DWB critics). Exit when
-#            both approach poses are latched by the ArUco tracker.
-#   State 4: navigate to PICK approach.
-#   State 5: navigate to PLACE approach.
-#   State 6: done.
+# Task 2 - Main State Machine 
 
-import math
+# Workflow: 
+
+    # State 0: Tuck the arm to a safe configuration for navigation.
+    # State 1: Wait for the arm to finish moving. Timeout and retry on failure.
+    # State 2: Localize with AMCL. 
+        # substeps: scatter particles, clear costmap memory, spin, wait convergence. 
+    # State 3: Explore the map randomly. 
+        # substeps: sample random reachable pose, send nav goal, wait for result or timeout, repeat until both markers are detected.
+    # State 4: Drive to the pick position 
+    # State 5: Drive to the place position
+    # State 6: Task completed.
+
 import time
 from threading import Event
 
@@ -40,37 +32,33 @@ class StateMachine(CommonStates):
 
         self.state = 0
         self.finished = False
+
+        # track substates during random search (state 3). 
         self.search_phase = "sample"
 
-        # Last send-time used by per-state timeout watchers. The original
-        # monolithic state machine kept this as a local variable; here we
-        # promote it to an attribute so the per-state methods can share it.
+        # Last send-time. Used for timeouts.
         self._send_time = None
 
-    # ------------------------------------------------------------------
+    # -----------
     # Main loop
-    # ------------------------------------------------------------------
+    # -----------
     def run(self, executor_ready: Event):
+        # Wait for ROS2 system 
         self.node.get_logger().info("State machine: waiting for executor...")
         executor_ready.wait()
         self.node.get_logger().info("Executor ready, giving the stack 10s to come up")
         time.sleep(10.0)
 
-        # Per-goal timeouts (see comments inline below).
-        PLANNING_TIMEOUT = 6.0
-        SEARCH_NAV_TIMEOUT = 120.0
-        # APPROACH_NAV_TIMEOUT raised from 60 -> 180 s: PICK -> PLACE
-        # traversal can be ~5 m through tight pockets. When DWB cannot
-        # make progress, Nav2's BT navigate_w_replanning_and_recovery
-        # runs a recovery cycle (ClearLocalCostmap + Spin + Wait +
-        # replan), each cycle ~10-15 s. At 60 s we were cancelling after
-        # only 2-3 cycles and re-sending the same goal, restarting the
-        # BT from scratch and losing all progress. 180 s lets the BT
-        # exhaust ~10 recovery cycles before we give up.
-        APPROACH_NAV_TIMEOUT = 180.0
+        # timeouts
+        PLANNING_TIMEOUT = 6.0 # Time allowed for MoveIt to plan an arm path
+        EXECUTION_TIMEOUT = 30.0  # Time allowed for the physical arm movement
+        SEARCH_NAV_TIMEOUT = 120.0 # Time allowed to reach a random exploration point
+        APPROACH_NAV_TIMEOUT = 180.0 # Time allowed to reach the pick/place approach pose.
 
+        # Main state machine loop
         while rclpy.ok() and not self.finished:
             try:
+                # Update status flags.
                 self.arm.update_flags()
                 self.nav.update_flags()
                 self.amcl.update_spin_flags()
@@ -79,15 +67,11 @@ class StateMachine(CommonStates):
                 if self.state == 0:
                     self.state_0_arm_tuck()
                 elif self.state == 1:
-                    self.state_1_wait_arm(PLANNING_TIMEOUT)
+                    self.state_1_wait_arm(PLANNING_TIMEOUT, EXECUTION_TIMEOUT)
                 elif self.state == 2:
                     self.state_2_amcl_localization()
                 elif self.state == 3:
                     if self.state_3_random_search(SEARCH_NAV_TIMEOUT):
-                        # The State 3 helper returns True when it issued
-                        # a `continue` equivalent (e.g. timeout watcher
-                        # fired). Skip the trailing sleep so we react
-                        # fast to the cancel/result update.
                         continue
                 elif self.state == 4:
                     if self.state_4_pick(APPROACH_NAV_TIMEOUT):

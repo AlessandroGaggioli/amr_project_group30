@@ -1,35 +1,26 @@
-# TASK 2 of Autonomous Mobile Robotics Exam - Group 30
-#
-# ArUco tracker (Lab 3 pattern, adapted for 2-D base navigation):
-#
-#   - Each aruco_single node runs with reference_frame=''
-#     -> publishes the marker pose in the camera optical frame.
-#   - This component subscribes to /aruco_pick/aruco_single/transform
-#     and /aruco_place/aruco_single/transform and composes the marker
-#     pose into the MAP frame AT THE TIME OF THE DETECTION
-#     (msg.header.stamp). This freezes the marker at its true world
-#     position; recomposing later with a fresh map<-camera TF would
-#     make the result slide as the camera moves.
-#   - A 5 Hz timer derives the approach frame (offset along marker +Z,
-#     projected onto the horizontal plane) and broadcasts it as
-#     `aruco_pick_approach` / `aruco_place_approach`. The first
-#     successful composition latches a PoseStamped that Nav2 navigates to.
-#
-# Composition is gated on AMCL convergence: until AMCL is locked, the
-# map<-camera TF is built on top of AMCL's prior (uniform or wrong) and
-# would produce a garbage map-frame position.
+# Autonomous Mobile Robotics Exam - Group 30
+
+# Task2 - Aruco Tracker
+
+# Workflow:
+    # Subscribe to the aruco_single TF topic for both PICK and PLACE markers.
+    # When a new marker pose is received, compose it with the map -camera TF
+    # Computes the approach pose with an offset along the marker direction
+    # Publish the approach pose as a TF
+    
+# Notes: 
+    # Waits until the robot is localized (AMCL converged) 
+    # Memory the closest (and hopefully most accurate) detection for each marker. 
+    # Freezes the the approach pose when the robot starts its final approach (to prevent nav2 goal jump around)
 
 import math
 
 from rclpy.duration import Duration
-from rclpy.qos import QoSProfile
-
-import rclpy.time
 
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from PyKDL import Frame, Rotation, Vector
 
-from tiago_project_group30.task2_constants import (
+from tiago_project_group30.constants import (
     APPROACH_DISTANCE,
     CAMERA_FRAME,
     MAX_DETECTION_DISTANCE,
@@ -49,46 +40,30 @@ class ArucoTracker:
         self.map_frame = map_frame
         self.camera_frame = CAMERA_FRAME
 
-        # While True, approach poses are continuously *replaced* with the
-        # latest aruco observation (so noisy long-range first detections
-        # are overwritten as the robot gets closer). Set to False once we
-        # transition to State 4 so the nav goal does not chase a moving
-        # estimate during the final approach.
+        # While True the system updates the approach poses with the newest. 
+            # Set to False when the robot starts its final approach to prevent nav2 goal jump around.
         self._refresh_approach_poses = True
 
-        # Marker poses in MAP frame, composed at observation time.
-        # We do NOT store the raw camera-frame pose and recompose later,
-        # because doing so multiplies a *current* map<-camera TF by an
-        # *old* marker_in_camera (taken when the robot was elsewhere) and
-        # produces a frame that slides around the map as the robot moves.
+        # Stores the 3d position of the marker when it last saw it. 
         self.pick_marker_in_map = None     # PyKDL.Frame or None
         self.place_marker_in_map = None
 
-        # Distance from the camera to the marker at the moment of the
-        # observation that produced *_marker_in_map. ArUco pose accuracy
-        # degrades fast with distance (a 25 cm marker at 5 m is only ~30
-        # px wide, so its estimated depth/orientation can be off by a
-        # meter+). We use these to KEEP THE CLOSEST OBSERVATION.
+        # Tracks how far the camera was from the marker when it last saw it. 
+            #Camera estimation get worse with the distance
+            # Used to keep the closest. 
         self.pick_detection_distance = float("inf")
         self.place_detection_distance = float("inf")
 
-        # Latched approach poses in map frame (PoseStamped)
+        # Final approach poses. 
         self.pick_approach_pose = None
         self.place_approach_pose = None
 
-        # Diagnostics: True once the aruco_single node has ever published
-        # a transform for that marker (regardless of TF lookup success).
+        # Flags to remember it the camera has ever seen the markers.
         self.pick_seen_in_camera = False
         self.place_seen_in_camera = False
 
-        # Subscriptions: aruco_single runs with reference_frame='' ->
-        # publishes marker pose in the CAMERA optical frame. The topic is
-        # private to the node so with namespace='aruco_pick'/name=
-        # 'aruco_single' it resolves to:
-        #     /aruco_pick/aruco_single/transform
-        # NOT /aruco_pick/transform (that one only appears in `ros2 topic
-        # list` because subscribing creates an entry, even with no
-        # publisher).
+        # Subscriptions to the ArUco detector nodes.
+            # Provides marker's position relative to the camera lens.
         node.create_subscription(
             TransformStamped, "/aruco_pick/aruco_single/transform",
             self._aruco_pick_cb, 10, callback_group=cb_group_io,
@@ -100,21 +75,20 @@ class ArucoTracker:
 
         # Approach-frame publisher timer. At 5 Hz, if we have a stored
         # marker_in_map, compute the approach offset and broadcast it as
-        # aruco_pick_approach / aruco_place_approach. The first successful
-        # broadcast latches the corresponding approach pose for Nav2.
+        # aruco_pick_approach / aruco_place_approach.
         self.approach_timer = node.create_timer(
             0.2, self.publish_approach_frames, callback_group=cb_group_io
         )
 
     def freeze(self):
-        # Called by the state machine on State 3 -> State 4 transition.
+        # Called by the state machine on State 3 - State 4 transition.
         # Stops the approach pose from being overwritten so Nav2's target
         # doesn't drift during the final approach.
         self._refresh_approach_poses = False
 
-    # ------------------------------------------------------------------
+    # ------------------------
     # Subscription callbacks
-    # ------------------------------------------------------------------
+    # ------------------------
     def _aruco_pick_cb(self, msg: TransformStamped):
         self._handle_aruco_detection(
             msg, label="PICK", marker_id=26, is_pick=True
@@ -127,17 +101,13 @@ class ArucoTracker:
 
     def _handle_aruco_detection(
         self, msg: TransformStamped, label: str, marker_id: int, is_pick: bool
-    ):
-        # Gate ArUco -> map composition on AMCL convergence. Until AMCL
-        # has converged, the TF map<-camera is built on top of AMCL's
-        # prior (uniform / uninitialized), so composing the marker pose
-        # with it gives a garbage map-frame position (we observed a PICK
-        # approach landing inside a wall when an ArUco detection was
-        # processed 1.3 s after /reinitialize_global_localization).
+        ):
+        # Do not process anything if the robot doesn't know where it is on the map yet.
+        # Calculating positions now would result in completely wrong map coordinates.
         if not self.amcl.converged:
             return
 
-        # Convert marker_in_camera frame (raw aruco_single output).
+        # Convert the raw camera message into a KDL Frame. 
         aruco_in_cam = Frame(
             Rotation.Quaternion(
                 msg.transform.rotation.x, msg.transform.rotation.y,
@@ -150,7 +120,7 @@ class ArucoTracker:
             ),
         )
 
-        # Diagnostic: log the first time we ever hear from this detector.
+        # Log the first time we see the marker in the camera.
         seen_flag = "pick_seen_in_camera" if is_pick else "place_seen_in_camera"
         if not getattr(self, seen_flag):
             setattr(self, seen_flag, True)
@@ -158,30 +128,25 @@ class ArucoTracker:
                 f"[diag] aruco_single {label} (ID {marker_id}) IS seeing the marker"
             )
 
-        # We only refresh the stored marker_in_map while still searching.
-        # Once State 4 has frozen the approach poses we keep the latched
-        # value so the nav goal target doesn't drift on us.
+        # If the approach pose if frozen, ignore new data. 
         already_have = (
             self.pick_marker_in_map if is_pick else self.place_marker_in_map
         ) is not None
         if already_have and not self._refresh_approach_poses:
             return
 
-        # ArUco pose accuracy degrades with distance. The camera-frame
-        # translation of the marker IS the distance from camera to marker,
-        # so we compute it directly without any TF.
+        # Computes the direct distance between the camera and the marker. 
         new_distance = math.sqrt(
             aruco_in_cam.p.x() ** 2
             + aruco_in_cam.p.y() ** 2
             + aruco_in_cam.p.z() ** 2
         )
 
-        # Reject detections beyond MAX_DETECTION_DISTANCE (PnP too noisy).
+        # Ignore markers that are too far away to be reliably detected.
         if new_distance > MAX_DETECTION_DISTANCE:
             return
 
-        # KEEP-CLOSEST policy: only overwrite the stored marker_in_map if
-        # this new observation is closer than the previous one.
+        # Keep closest: If we already found the marker, update its position only if the distance is smaller than the previous detections.
         prev_distance = (
             self.pick_detection_distance if is_pick
             else self.place_detection_distance
@@ -189,33 +154,26 @@ class ArucoTracker:
         if already_have and new_distance >= prev_distance:
             return  # this observation is no closer than what we already have
 
-        # CRITICAL: compose into MAP frame NOW, using the camera TF AT
-        # THE TIME OF THE DETECTION (msg.header.stamp). This freezes the
-        # marker at its true world position.
-        #
-        # We DO NOT fall back to "latest TF" (rclpy.time.Time()) when the
-        # stamped lookup fails. Under heavy CPU load (Gazebo + Nav2 +
-        # MoveIt + ArUco + AMCL) the TF for the detection timestamp can
-        # lag by 100-300 ms. Using the latest TF in that case composes
-        # aruco_in_cam (taken at time T) with map<-cam (computed at time
-        # T - dt, when the robot was elsewhere) -> marker_in_map ends up
-        # offset by however much the robot moved during dt. Empirically
-        # this produced wall-approach poses lying inside the surface
-        # inflation, making Nav2 reject every trajectory in State 4.
+        # CRITICAL:
+            # We must look up the robot's position on the map EXACTLY when the picture was taken.
+            # If we use the "current" time, any movement the robot made since the picture was taken 
+            # will cause the marker's calculated map position to be wrong.
         try:
             tf_map_cam = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 self.camera_frame,
-                msg.header.stamp,
+                msg.header.stamp, # time the picture was taken. 
                 timeout=Duration(seconds=0.5),
             )
         except Exception:
-            return  # no synced TF -> drop this detection rather than
-                    # silently compose with a stale transform
+            return  # If we can't get the exact time data, drop it and wait for the next one. 
 
+        # Multiply robot's map position by marker's camera position 
+            # To find marker's map position.
         frame_map_cam = transform_to_kdl_frame(tf_map_cam)
         marker_in_map = frame_map_cam * aruco_in_cam
 
+        # Save the marker's map position and detection distance.
         if is_pick:
             self.pick_marker_in_map = marker_in_map
             self.pick_detection_distance = new_distance
@@ -223,26 +181,24 @@ class ArucoTracker:
             self.place_marker_in_map = marker_in_map
             self.place_detection_distance = new_distance
 
-    # ------------------------------------------------------------------
-    # Approach-frame broadcaster (lab3-style, adapted for 2-D navigation)
-    # ------------------------------------------------------------------
-    # Lab 3 computes the approach by offsetting APPROACH_DISTANCE along
-    # the marker's Z axis and then applying DoRotY(pi/2) so the frame's X
-    # axis points toward the marker. That works well for the arm approach
-    # (Task 3) but for 2-D base navigation the resulting frame has
-    # non-zero pitch/roll (because the marker's Y is vertical/down), which
-    # looks wrong in RViz and produces an awkward Nav2 goal orientation.
-    #
-    # Instead we project the marker's Z axis onto the horizontal XY plane
-    # to get the approach direction, then build the approach frame with a
-    # flat orientation (roll=0, pitch=0, yaw toward marker). The position
-    # keeps the marker's Z height so Task 3 can reuse the same frame.
+    # ---------------------------
+    # Approach-frame broadcaster 
+    # ---------------------------
+
+    # Creates and broadcasts the spot the robot should nav to. 
+    # Flatten the approach pose to the 2d floor (xy plane) so the Nav2 system 
+    # can drive there properly. 
+    # Keep marker's original Z height purely for the arm. 
+
     def publish_approach_frames(self):
+        # Handle the pick marker 
         if self.pick_marker_in_map is not None:
             approach = self._compute_horizontal_approach(
                 self.pick_marker_in_map, APPROACH_DISTANCE
             )
             self._broadcast_frame(approach, PICK_APPROACH_FRAME)
+
+            # Save the pose (if it's first time or if we're still allowing updates)
             first_time = self.pick_approach_pose is None
             if first_time or self._refresh_approach_poses:
                 self.pick_approach_pose = self._frame_to_pose_stamped(approach)
@@ -252,6 +208,7 @@ class ArucoTracker:
                         f"({approach.p.x():.2f}, {approach.p.y():.2f})"
                     )
 
+        # Handle the place marker. Same logic.
         if self.place_marker_in_map is not None:
             approach = self._compute_horizontal_approach(
                 self.place_marker_in_map, APPROACH_DISTANCE
@@ -267,33 +224,33 @@ class ArucoTracker:
                     )
 
     def _compute_horizontal_approach(self, marker_in_map: Frame, distance: float) -> Frame:
-        # The marker's Z axis in map frame: points toward the camera/robot
-        # (out of the marker face -- standard aruco_ros convention).
+        # Computes a safe position in front of the marker for the mobile base.
+        # Find the direction marker (Z axis). 
+
         marker_z = marker_in_map.M * Vector(0.0, 0.0, 1.0)
 
-        # Project to the horizontal plane (ignore Z component).
+        # Flatten the direction into 2D floor. 
         horiz = math.sqrt(marker_z.x() ** 2 + marker_z.y() ** 2)
         if horiz > 0.05:
             dx = marker_z.x() / horiz
             dy = marker_z.y() / horiz
         else:
-            # Fallback for nearly-vertical Z (top-mounted marker): use +X.
+            # Fallback if the marker is pointing straight up or down. 
             dx, dy = 1.0, 0.0
 
-        # Approach position: offset from marker in the marker-toward-robot direction.
+        # Create target point 
         ax = marker_in_map.p.x() + distance * dx
         ay = marker_in_map.p.y() + distance * dy
         az = marker_in_map.p.z()  # keep marker height (useful for Task 3 arm approach)
 
-        # Yaw so the robot faces the marker when it arrives at the approach pose.
+        # Computes yaw so the robot directly faces the marker. 
         yaw = math.atan2(marker_in_map.p.y() - ay, marker_in_map.p.x() - ax)
 
-        # Flat orientation (roll=0, pitch=0) so Z points up in the map frame:
-        # visually clean in RViz and correct for Nav2's 2-D heading.
+        # Flat orientation 
         return Frame(Rotation.RPY(0.0, 0.0, yaw), Vector(ax, ay, az))
 
     def _broadcast_frame(self, frame: Frame, child_frame_id: str):
-        # Same pattern as lab3's publish_frame().
+        # Converts KDL Frame to ROS TransformStamped and broadcasts it.
         t = TransformStamped()
         t.header.stamp = self.node.get_clock().now().to_msg()
         t.header.frame_id = self.map_frame
@@ -310,6 +267,7 @@ class ArucoTracker:
         self.tf_broadcaster.sendTransform(t)
 
     def _frame_to_pose_stamped(self, frame: Frame) -> PoseStamped:
+        # Converts KDL Frame to ROS PoseStamped. 
         ps = PoseStamped()
         ps.header.stamp = self.node.get_clock().now().to_msg()
         ps.header.frame_id = self.map_frame

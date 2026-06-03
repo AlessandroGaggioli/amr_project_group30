@@ -1,57 +1,45 @@
-#TASK 1 of Autonomous Mobile Robotics Exam - Group 30 
+# TASK 1 of Autonomous Mobile Robotics Exam - Group 30
+#
+# Launches:
+#   - Gazebo simulation of the group30 world (with MoveIt)
+#   - Nav2 navigation stack in SLAM mode (for map generation)
+#   - task1_manager: tucks the arm to HOME, then exits
+#   - explore_lite: started 5 s AFTER task1_manager exits, drives the
+#     autonomous frontier exploration that builds the map
+#
+# Shared Gazebo / Nav2 includes  in tiago_project_group30.launch_common.
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory
-from launch.actions import IncludeLaunchDescription, TimerAction
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessExit
-from launch.actions import RegisterEventHandler
-import os
+from launch_ros.actions import Node
+
+from tiago_project_group30.launch_common import tiago_sim, nav_bringup
+
 
 def generate_launch_description():
 
-    #Gazebo simulation with specific world (group 30 world)
-    tiago_sim = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([os.path.join(
-            get_package_share_directory('tiago_exam'),'launch','tiago_exam.launch.py')]),
-        launch_arguments={
-            'world_name': 'group30',
-            'moveit':'true'
-        }.items()
-    )
-    
-    #Navigation Stack with SLAM 
+    # Gazebo + MoveIt (group30 world) and Nav2 with SLAM (map generation).
+    sim = tiago_sim()
+    slam_nav = nav_bringup(slam=True)
 
-    #PER CAMBIARE I PARAMETRI DI NAV2
-    # ~/tiago_ws/src/pal_navigation_cfg_public/pal_navigation_cfg_params/params$ code tiago_nav2.yaml 
-    #==========================================
-    # slam nav original (tiago_2dnav -- tiago_nav_bringup.launch.py)
-    #===========================================
-
-    slam_nav = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([os.path.join(
-            get_package_share_directory('tiago_2dnav'),'launch','tiago_nav_bringup.launch.py')]),
-            launch_arguments={
-                'is_public_sim':'false',
-                'rviz':'true',
-                'slam':'true'
-            }.items()
-    )
-
-    #Explore node (explore_lite)
+    # explore_lite config (frontier exploration tuning).
     explore_config = os.path.join(
         get_package_share_directory('tiago_project_group30'),
         'config',
-        'explore_lite.yaml'
+        'explore_lite.yaml',
     )
 
-    arm_home_node = Node(
+    # Arm -> HOME, then exits so explore can start with a clean profile.
+    task1_manager = Node(
         package='tiago_project_group30',
         executable='task1_manager',
         output='screen',
-        parameters=[{'use_sim_time': True}]
+        parameters=[{'use_sim_time': True}],
     )
 
     explore_node = Node(
@@ -61,25 +49,21 @@ def generate_launch_description():
         output='screen',
         parameters=[
             explore_config,
-            {'use_sim_time':True}
-        ]
+            {'use_sim_time': True},
+        ],
     )
 
+    # Start explore_lite 5 s after the arm-tuck manager exits.
     explore = RegisterEventHandler(
         event_handler=OnProcessExit(
-            target_action=arm_home_node,
-            on_exit=[
-                TimerAction(
-                    period=5.0,
-                    actions=[explore_node],
-                )
-            ]
+            target_action=task1_manager,
+            on_exit=[TimerAction(period=5.0, actions=[explore_node])],
         )
     )
 
     return LaunchDescription([
-        tiago_sim,
+        sim,
         slam_nav,
-        arm_home_node,
-        explore
+        task1_manager,
+        explore,
     ])
